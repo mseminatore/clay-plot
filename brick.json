@@ -2,7 +2,7 @@
   "name": "plot",
   "version": "0.1.0",
   "clay": ">=0.3.5",
-  "description": "Charts and figures in the style of matplotlib: line, scatter, bar, histogram and image plots, subplots, legends and colormaps, saved as SVG",
+  "description": "Charts and figures in the style of matplotlib: line, scatter, bar, histogram and image plots, subplots, legends and colormaps, saved as PNG or SVG",
   "main": "src/main.clay",
   "deps": {
     "image": "github.com/mseminatore/clay-image"

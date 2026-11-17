@@ -260,13 +260,55 @@ Test describe("SVG output") {
         Test assertTrue(File read(path) contains("<svg"))
         File delete(path)
         File delete(dir)
-        e = Test assertRaises({ Plot savefig("x.png") })
-        Test assertTrue(e message contains("PNG"))
-        Test assertRaises({ Plot savefig("x.pdf") })
+        e = Test assertRaises({ Plot savefig("x.pdf") })
+        Test assertTrue(e message contains(".png or .svg"))
+    }
+    Test it("measures text with the font") {
+        Test assertTrue(PlotSvg measure("MMMM", 10) > PlotSvg measure("iiii", 10))
+        Test assertEqual(Math round(PlotSvg measure("Hello", 20)), 51)
     }
     Test it("draws an empty figure") {
         Plot close
         Test assertTrue(PlotFigure new toSvg contains("</svg>"))
+    }
+}
+
+Test describe("PNG output") {
+    Test it("saves .png files at the figure's size, or another dpi") {
+        Plot close
+        Plot figure(#{figsize: [4, 3], dpi: 50})
+        Plot plot([1, 3, 2], "o-", #{label: "data"})
+        Plot title("PNG"); Plot legend; Plot grid
+        dir = File tempDir
+        path = dir + "/out.png"
+        Plot savefig(path)
+        img = Image load(path)
+        Test assertEqual([img width, img height, img channels], [200, 150, 4])
+        Plot savefig(path, #{dpi: 100})
+        Test assertEqual((Image load(path)) width, 400)
+        Test assertEqual(Plot gcf dpi, 50)          // the figure's own is kept
+        File delete(path)
+        File delete(dir)
+    }
+    Test it("draws data in the axes, on a white background") {
+        Plot close
+        Plot figure(#{figsize: [2, 2], dpi: 50})
+        Plot fillBetween([0, 1], [1, 1], #{color: "r"})
+        Plot axis("off")
+        Plot xlim(0, 1); Plot ylim(0, 1)
+        px = Plot gcf toCanvas toImage pixels bytes
+        at = { |x, y| i = ((y * 100) + x) * 4; [px at(i), px at(i + 1), px at(i + 2), px at(i + 3)] }
+        Test assertEqual(at value(50, 50), [255, 0, 0, 255])    // inside the axes: the fill
+        Test assertEqual(at value(1, 1), [255, 255, 255, 255])  // the margin: background
+    }
+    Test it("snaps thin lines to the pixel grid") {
+        Test assertEqual(PlotPng _snap(10.2, 1), 10.5)
+        Test assertEqual(PlotPng _snap(10.7, 2), 11)
+    }
+    Test it("returns PNG bytes") {
+        Plot close
+        Plot plot([1, 2])
+        Test assertEqual(Plot toPng bytes slice(0, 4), [137, 80, 78, 71])
     }
 }
 

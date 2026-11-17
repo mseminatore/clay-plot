@@ -103,29 +103,12 @@ PlotSvg = Object clone {
 
     unclip() { parts append("</g>\n") }
 
-    // Estimated width in pixels of a string drawn at a font size, from
-    // typical sans-serif character widths (SVG text is measured by whoever
-    // renders it, so this only has to be close enough for layout)
+    // Width in pixels of a string drawn at a font size, measured with DejaVu
+    // Sans, the first font the SVG asks for (a viewer without it uses a
+    // similar sans-serif, so the layout is close either way)
     measure(s, size) {
         (s == nil) ifTrue { return 0 }
-        total = 0.0
-        s toString bytes each { |b|
-            (b >= 128 && b < 192) ifTrue { continue }
-            total = total + _charWidth(b)
-        }
-        total * size
-    }
-
-    _charWidth(b) {
-        (b >= 192) ifTrue { return 0.62 }
-        (b == 32) ifTrue { return 0.32 }
-        (b >= 48 && b <= 57) ifTrue { return 0.64 }
-        ch = String chr(b)
-        ("iljI.,:;'|!" contains(ch)) ifTrue { return 0.3 }
-        ("frt()[]-" contains(ch)) ifTrue { return 0.4 }
-        ("mwMW" contains(ch)) ifTrue { return 0.92 }
-        (b >= 65 && b <= 90) ifTrue { return 0.72 }
-        0.6
+        Canvas textWidth(s toString, size)
     }
 
     // How far below the given y the baseline goes for a vertical alignment

@@ -18,7 +18,7 @@ val = history map { |r| (r at(2) < 0) ifTrue { nil } ifFalse { r at(2) } }
 Plot plot(loss, #{label: "train"})
 Plot plot(val, #{label: "validation"})
 Plot xlabel("epoch"); Plot ylabel("loss"); Plot legend; Plot title("history with gaps")
-Plot savefig(out + "/history.svg")
+Plot savefig(out + "/history.svg"); Plot savefig(out + "/history.png")
 Plot close
 
 // a confusion matrix, annotated
@@ -33,7 +33,7 @@ Plot colorbar
 } }
 Plot xticks([0, 1, 2], names); Plot yticks([0, 1, 2], names)
 Plot xlabel("predicted"); Plot ylabel("actual"); Plot title("Confusion matrix")
-Plot savefig(out + "/confusion.svg")
+Plot savefig(out + "/confusion.svg"); Plot savefig(out + "/confusion.png")
 Plot close
 
 // a grid of 28 x 28 "digits", axes off
@@ -51,7 +51,7 @@ Plot close
     ax axis("off")
 }
 fig suptitle("Samples")
-fig savefig(out + "/digits.svg")
+fig savefig(out + "/digits.svg"); fig savefig(out + "/digits.png")
 
 // ROC
 Plot figure(#{figsize: [5, 5]})
@@ -63,7 +63,7 @@ Plot plot([0, 1], [0, 1], "k--", #{label: "chance", lw: 1})
 Plot xlim(0, 1); Plot ylim(0, 1)
 Plot xlabel("false positive rate"); Plot ylabel("true positive rate"); Plot title("ROC")
 Plot legend(#{loc: "lower right"})
-Plot savefig(out + "/roc.svg")
+Plot savefig(out + "/roc.svg"); Plot savefig(out + "/roc.png")
 Plot close
 
 // horizontal bars, rotated tick labels, text in axes coordinates
@@ -72,7 +72,7 @@ Plot barh(["conv1", "conv2", "dense1", "dense2", "output"], [0.12, 0.31, 0.92, 0
 Plot text(0.98, 0.04, "weights' mean |w|", #{transform: "axes", ha: "right", color: "gray"})
 Plot grid(#{axis: "x"})
 Plot title("Per-layer magnitude", #{loc: "left"})
-Plot savefig(out + "/layers.svg")
+Plot savefig(out + "/layers.svg"); Plot savefig(out + "/layers.png")
 Plot close
 
 // a spectrogram-sized heatmap: 128 bands x 400 frames, low bands at the bottom
@@ -90,6 +90,6 @@ Plot figure(#{figsize: [8, 3.5]})
 Plot imshow(spec, #{origin: "lower", aspect: "auto", cmap: "magma"})
 Plot colorbar(#{label: "dB"})
 Plot xlabel("frame"); Plot ylabel("mel band"); Plot title("Spectrogram")
-Plot savefig(out + "/spectrogram.svg")
+Plot savefig(out + "/spectrogram.svg"); Plot savefig(out + "/spectrogram.png")
 Plot close
 ("wrote " + out) println

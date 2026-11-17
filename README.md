@@ -2,9 +2,9 @@
 
 Charts and figures for [Clay](https://github.com/mseminatore/clay), in the style of
 matplotlib's `pyplot`: line plots, scatter plots, bar charts, histograms, images and heatmaps,
-subplots, legends, colour bars and colormaps. Figures are saved as SVG, which any browser
-shows and which web pages and Markdown can embed; images and heatmaps go inside them as PNG,
-made by [clay-image](https://github.com/mseminatore/clay-image).
+subplots, legends, colour bars and colormaps. Figures are saved as PNG, drawn anti-aliased
+by [clay-image](https://github.com/mseminatore/clay-image), or as SVG, which any browser shows
+and which web pages and Markdown can embed.
 
 If you know matplotlib, you already know most of it: the function names, format strings
 (`"r--"`, `"o-"`), colour names (`"C1"`, `"tab:orange"`), colormaps (`"viridis"`) and
@@ -18,7 +18,7 @@ Plot plot(epochs, train, #{label: "train"})
 Plot plot(epochs, valid, "--", #{label: "validation"})
 Plot xlabel("epoch"); Plot ylabel("loss"); Plot title("Learning curve")
 Plot grid; Plot legend
-Plot savefig("loss.svg")
+Plot savefig("loss.png")            // or "loss.svg"
 ```
 
 ![A learning curve](docs/images/learning_curve.svg)
@@ -53,7 +53,7 @@ fig savefig("subplots.svg")
 | `plt.xticks(pos, labels, rotation=45)` | `Plot xticks(pos, labels, #{rotation: 45})` |
 | `plt.text(0.5, 0.5, "s", transform=ax.transAxes)` | `Plot text(0.5, 0.5, "s", #{transform: "axes"})` |
 | `plt.rcParams["font.size"] = 12` | `Plot rc set("font.size", 12)` |
-| `plt.savefig("f.svg")`, `plt.show()`, `plt.close()` | `Plot savefig("f.svg")`, `Plot show`, `Plot close` |
+| `plt.savefig("f.png", dpi=150)`, `plt.show()`, `plt.close()` | `Plot savefig("f.png", #{dpi: 150})`, `Plot show`, `Plot close` |
 
 `Plot` keeps a current figure and axes, as pyplot does: `Plot plot(...)` draws on
 `Plot gca`, made when first needed. `Plot figure(#{figsize: [w, h], dpi: 100})` starts a new
@@ -104,9 +104,10 @@ return the artist they add, a Dict (`line get("color")`, `line set("label", "new
 | `Plot gcf`, `Plot gca`, `Plot sca(ax)` | The current figure and axes; make an axes current |
 | `fig axes`, `fig ax(row, col)` | All the figure's axes; the one at a grid position |
 | `suptitle(s, opts)` | A title above all the subplots |
-| `savefig(path)` | Save; the extension picks the format: `.svg` |
-| `toSvg` | The figure as SVG text, e.g. to return from a web handler |
-| `show` | Save to a temporary file and open it in the system's viewer (usually the browser for SVG). `Plot show` then starts a fresh figure, as pyplot does. Returns the file's path. |
+| `savefig(path, opts)` | Save; the extension picks the format, `.png` or `.svg`. `opts`: `dpi`, to save at another resolution than the figure's (`#{dpi: 200}` for print). |
+| `toPng(dpi)`, `toSvg(dpi)` | The figure as a PNG file's bytes or as SVG text, e.g. to return from a web handler |
+| `toCanvas(dpi)` | The figure drawn on a clay-image `Canvas`, to draw more on it, or `toImage` for an `Image` |
+| `show` | Save to a temporary PNG and open it in the system's image viewer. `Plot show` then starts a fresh figure, as pyplot does. Returns the file's path. |
 | `Plot close`, `Plot clf` | Forget the current figure; clear its axes |
 | `Plot rc` | The default settings, a Dict named as matplotlib's rcParams: `figure.figsize`, `figure.dpi`, `font.size`, `axes.titlesize`, `axes.labelsize`, `xtick.labelsize`, `ytick.labelsize`, `legend.fontsize`, `lines.linewidth`, `lines.markersize`, `axes.linewidth`, `axes.grid`, `axes.xmargin`, `axes.ymargin`, `grid.color`, `grid.linewidth`, `grid.alpha`, `image.cmap` |
 
@@ -195,11 +196,11 @@ Plot xlabel("frame"); Plot ylabel("mel band")
 
 ## Limitations
 
-- SVG is the only output format so far. PNG (through clay-image) is planned.
-- SVG viewers measure the text, so the layout estimates text widths; unusual fonts may sit a
-  little closer or further than intended.
-- Images are embedded as base64 PNG, which makes an SVG about a third larger than the PNG
-  itself (a 128 x 400 spectrogram is about 200 KB).
+- Text is DejaVu Sans only, in one weight (`fontweight` applies to SVG alone). SVG asks the
+  viewer for DejaVu Sans and the layout measures text with it; a viewer without the font uses
+  another sans-serif, which may sit a little closer or further than intended.
+- In SVG, images are embedded as base64 PNG, about a third larger than the PNG itself (a
+  128 x 400 spectrogram is about 200 KB).
 - No log scales, error bars, pie charts, contour plots or 3-D yet.
 
 ## Install
@@ -209,7 +210,7 @@ clay bricks add github.com/mseminatore/clay-plot plot
 ```
 
 clay-plot depends on [clay-image](https://github.com/mseminatore/clay-image), a native brick:
-its C code (stb_image) is compiled the first time it is imported, which needs a C compiler,
+its C code (stb_image, and its canvas) is compiled the first time it is imported, which needs a C compiler,
 and `clay bricks add` asks before installing it.
 
 ## Develop
@@ -223,10 +224,11 @@ clay examples/ml.clay
 
 The code is in `src/`: `main.clay` (`Plot`, the pyplot-style functions and `rc`),
 `figure.clay` (`PlotFigure`: layout and saving), `axes.clay` (`PlotAxes`: artists, scales,
-ticks, legend, drawing), `ticks.clay` (`PlotTicks`), `color.clay` (`PlotColor`) and `svg.clay`
-(`PlotSvg`). Axes draw through a handful of primitives (`line`, `polyline`, `polygon`,
-`rect`, `circle`, `text`, `image`, `clip`, `measure`) listed at the top of `svg.clay`, so a new
-backend implements just those.
+ticks, legend, drawing), `ticks.clay` (`PlotTicks`), `color.clay` (`PlotColor`), and the
+backends `svg.clay` (`PlotSvg`) and `png.clay` (`PlotPng`, on clay-image's `Canvas`). Axes
+draw through a handful of primitives (`line`, `polyline`, `polygon`, `rect`, `circle`, `text`,
+`image`, `clip`, `measure`) listed at the top of `svg.clay`, so a new backend implements just
+those.
 
 To work on clay-image at the same time, replace `bricks/image` with a link to your checkout
 (`mklink /J bricks\image ..\clay-image` on Windows, `ln -s ../../clay-image bricks/image`

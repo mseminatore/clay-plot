@@ -17,7 +17,7 @@ Plot xlabel("epoch")
 Plot ylabel("loss")
 Plot grid
 Plot legend
-Plot savefig(out + "/learning_curve.svg")
+Plot savefig(out + "/learning_curve.svg"); Plot savefig(out + "/learning_curve.png")
 Plot close
 
 // 2. markers, scatter with a colormap, and a colorbar
@@ -26,7 +26,7 @@ Plot plot(xs, xs map { |x| Math sin(x) }, "o-", #{label: "sin", markersize: 4})
 Plot plot(xs, xs map { |x| Math cos(x) }, "s:", #{label: "cos", markersize: 3})
 Plot legend
 Plot title("Format strings")
-Plot savefig(out + "/trig.svg")
+Plot savefig(out + "/trig.svg"); Plot savefig(out + "/trig.png")
 Plot close
 
 // 3. subplots: bar, hist, scatter, imshow
@@ -50,6 +50,6 @@ axs at(1) at(1) imshow(img, #{cmap: "coolwarm"})
 axs at(1) at(1) colorbar
 axs at(1) at(1) title("imshow")
 fig suptitle("Subplots")
-fig savefig(out + "/subplots.svg")
+fig savefig(out + "/subplots.svg"); fig savefig(out + "/subplots.png")
 
 ("wrote " + out) println

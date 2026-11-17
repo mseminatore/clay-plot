@@ -6,7 +6,7 @@
 //   Plot plot([1, 4, 9, 16], #{label: "squares"})
 //   Plot plot([1, 2, 3, 4], "r--", #{label: "linear"})
 //   Plot title("Growth"); Plot xlabel("n"); Plot legend
-//   Plot savefig("growth.svg")
+//   Plot savefig("growth.png")              // or .svg
 //
 //   [fig, axs] = Plot subplots(1, 2, #{figsize: [10, 4]})
 //   axs at(0) hist(values, 20)
@@ -16,8 +16,8 @@
 // Plot keeps a current figure and axes, as pyplot does; the drawing methods
 // (plot, scatter, bar, hist, imshow ...) go to the current axes. Figures and
 // axes can also be used directly: PlotFigure, PlotAxes. Colours and
-// colormaps are in PlotColor, tick placement in PlotTicks, and the SVG
-// backend is PlotSvg.
+// colormaps are in PlotColor, tick placement in PlotTicks, and the backends
+// are PlotSvg and PlotPng (which draws on the image brick's Canvas).
 //
 // Every brick shares one set of top-level names with the program that imports
 // it, so this one's all start with Plot.
@@ -26,6 +26,7 @@ import("image")
 import("color.clay")
 import("ticks.clay")
 import("svg.clay")
+import("png.clay")
 import("axes.clay")
 import("figure.clay")
 
@@ -129,11 +130,13 @@ Plot = Object clone {
 
     // ---- output -----------------------------------------------------------
 
-    // Save the current figure; the extension picks the format (.svg)
+    // Save the current figure; the extension picks the format (.png or
+    // .svg). opts: dpi
     savefig(path, opts = nil) { gcf savefig(path, opts) }
 
-    // The current figure as SVG text
-    toSvg() { gcf toSvg }
+    // The current figure as SVG text, or as a PNG file's bytes
+    toSvg(dpiFor = nil) { gcf toSvg(dpiFor) }
+    toPng(dpiFor = nil) { gcf toPng(dpiFor) }
 
     // Open the current figure in the system viewer, then start afresh (as
     // pyplot's show); returns the temporary file's path

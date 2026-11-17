@@ -1,0 +1,133 @@
+// PlotPng -- the PNG backend: draws plot primitives on a Canvas (image brick)
+//
+// The same primitives as PlotSvg (see svg.clay), drawn into pixels with
+// clay-image's anti-aliased Canvas. Like matplotlib, horizontal and vertical
+// lines and rectangle edges are snapped to the pixel grid, so thin axes,
+// ticks and grid lines stay sharp.
+
+PlotPng = Object clone {
+    canvas = nil
+    width = 0
+    height = 0
+
+    init(w, h, background = "#ffffff") {
+        self width = w
+        self height = h
+        self canvas = Canvas new(w, h, background ?? [255, 255, 255, 0])
+    }
+
+    // The finished canvas
+    finish() { canvas }
+
+    line(x1, y1, x2, y2, style) {
+        st = style ?? #{}
+        lw = st get("width") ?? 1
+        (x1 == x2) ifTrue { x1 = _snap(x1, lw); x2 = x1 }
+        (y1 == y2) ifTrue { y1 = _snap(y1, lw); y2 = y1 }
+        _stroke([x1, y1, x2, y2], st, false)
+    }
+
+    polyline(xs, ys, style) {
+        (xs size < 2) ifTrue { return nil }
+        _stroke(_points(xs, ys), style, false)
+    }
+
+    polygon(xs, ys, style) {
+        (xs size < 3) ifTrue { return nil }
+        pts = _points(xs, ys)
+        _fill(pts, style)
+        _stroke(pts, style, true)
+    }
+
+    rect(x, y, w, h, style) {
+        (w < 0) ifTrue { x = x + w; w = 0 - w }
+        (h < 0) ifTrue { y = y + h; h = 0 - h }
+        st = style ?? #{}
+        // filled edges on pixel boundaries (bars meet without seams), strokes
+        // on pixel centres
+        x0 = Math round(x)
+        y0 = Math round(y)
+        x1 = Math round(x + w)
+        y1 = Math round(y + h)
+        ((x1 > x0) && (y1 > y0)) ifTrue { _fill([x0, y0, x1, y0, x1, y1, x0, y1], st) }
+        (st get("stroke") != nil) ifTrue {
+            lw = st get("width") ?? 1
+            sx0 = _snap(x, lw)
+            sy0 = _snap(y, lw)
+            sx1 = _snap(x + w, lw)
+            sy1 = _snap(y + h, lw)
+            _stroke([sx0, sy0, sx1, sy0, sx1, sy1, sx0, sy1], st, true)
+        }
+    }
+
+    circle(cx, cy, r, style) {
+        st = style ?? #{}
+        fill = st get("fill")
+        (fill != nil) ifTrue { canvas fillCircle(cx, cy, r, _color(fill, st get("alpha"))) }
+        (st get("stroke") != nil) ifTrue {
+            canvas strokeCircle(cx, cy, r, _color(st get("stroke"), st get("alpha")), st get("width") ?? 1)
+        }
+    }
+
+    text(x, y, s, style) {
+        size = style get("size") ?? 12
+        rot = style get("rotate") ?? 0
+        dy = PlotSvg _baselineShift(style get("valign"), size)
+        rad = (rot * Math pi) / 180
+        // the baseline shift is "down" in the text's own (turned) frame
+        bx = x + (dy * Math sin(rad))
+        by = y + (dy * Math cos(rad))
+        color = _color(style get("color") ?? "#000000", style get("alpha"))
+        canvas text(s, bx, by, size, color, #{anchor: style get("anchor") ?? "start", angle: rot})
+    }
+
+    image(x, y, w, h, img, style = nil) {
+        st = style ?? #{}
+        canvas drawImage(img, x, y, w, h, #{alpha: st get("alpha") ?? 1, flipY: st get("flipY") == true})
+    }
+
+    clip(x, y, w, h) { canvas clip(x, y, w, h) }
+    unclip() { canvas unclip }
+
+    measure(s, size) {
+        (s == nil) ifTrue { return 0 }
+        canvas textWidth(s toString, size)
+    }
+
+    // ---- internal -----------------------------------------------------------
+
+    _fill(pts, st) {
+        fill = st get("fill")
+        (fill != nil) ifTrue { canvas fillPolygon(pts, _color(fill, st get("alpha"))) }
+    }
+
+    _stroke(pts, st, closed) {
+        stroke = (st ?? #{}) get("stroke")
+        (stroke == nil) ifTrue { return nil }
+        lw = st get("width") ?? 1
+        opts = #{closed: closed, join: st get("join") ?? "round", cap: st get("cap") ?? "butt"}
+        dash = st get("dash")
+        ((dash != nil) && (dash size > 0)) ifTrue { opts set("dash", dash) }
+        canvas strokePolyline(pts, _color(stroke, st get("alpha")), lw, opts)
+    }
+
+    // A coordinate on the pixel grid: lines of odd width on pixel centres,
+    // even width on pixel edges
+    _snap(v, lw) {
+        w = Math max(1, Math round(lw))
+        ((w % 2) == 1) ifTrue { Math floor(v) + 0.5 } ifFalse { Math round(v) }
+    }
+
+    _points(xs, ys) {
+        pts = []
+        xs size times { |i| pts append(xs at(i)); pts append(ys at(i)) }
+        pts
+    }
+
+    // [r, g, b, alpha] for a "#rrggbb" and an optional alpha
+    _color(hex, alpha) {
+        c = PlotColor rgb(hex)
+        c append((alpha == nil) ifTrue { 1 } ifFalse { alpha })
+        c
+    }
+}

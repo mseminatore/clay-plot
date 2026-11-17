@@ -84,29 +84,56 @@ PlotFigure = Object clone {
     // Remove all axes
     clear() { self axesList = []; self suptitleText = nil; self }
 
-    // Save to a file; the extension picks the format (.svg)
+    // Save to a file; the extension picks the format: .png or .svg.
+    // opts: dpi (pixels per inch for this file; the figure's own by default)
     savefig(path, opts = nil) {
         dot = path lastIndexOf(".")
         ext = ((dot == nil) || (dot < 0)) ifTrue { "" } ifFalse { path slice(dot + 1, path length) lower }
+        dpiFor = (opts == nil) ifTrue { nil } ifFalse { opts get("dpi") }
         (ext == "svg") ifTrue {
-            File write(path, toSvg)
+            File write(path, toSvg(dpiFor))
             return path
         }
-        (ext == "png") ifTrue { raise("Plot: PNG output is not available yet; save as .svg for now") }
-        raise("Plot: savefig can't write \"" + path + "\": use a .svg file name")
+        (ext == "png") ifTrue {
+            File write(path, toPng(dpiFor))
+            return path
+        }
+        raise("Plot: savefig can't write \"" + path + "\": use a .png or .svg file name")
     }
 
     // The figure as an SVG document (a String), e.g. to serve from a web app
-    toSvg() {
-        cv = PlotSvg new(width, height, facecolor)
-        render(cv)
-        cv finish
+    toSvg(dpiFor = nil) {
+        _withDpi(dpiFor) {
+            cv = PlotSvg new(width, height, facecolor)
+            render(cv)
+            cv finish
+        }
     }
 
-    // Save to a temporary file and open it in the system's viewer; returns
-    // the file's path
+    // The figure as a PNG file's bytes (a String)
+    toPng(dpiFor = nil) { (toCanvas(dpiFor)) pngBytes }
+
+    // The figure drawn on a Canvas (image brick); toCanvas toImage is an Image
+    toCanvas(dpiFor = nil) {
+        _withDpi(dpiFor) {
+            cv = PlotPng new(width, height, facecolor)
+            render(cv)
+            cv finish
+        }
+    }
+
+    // Run a block with dpi set to dpiFor (if given), then put it back
+    _withDpi(dpiFor, block) {
+        (dpiFor == nil) ifTrue { return block value }
+        saved = dpi
+        self dpi = dpiFor
+        try { block value } finally { self dpi = saved }
+    }
+
+    // Save to a temporary PNG and open it in the system's image viewer;
+    // returns the file's path
     show() {
-        path = File tempDir + "/figure.svg"
+        path = File tempDir + "/figure.png"
         savefig(path)
         platform = System platform
         cmd = (platform == "windows") ifTrue { ["cmd", "/c", "start", "", path] } ifFalse {
