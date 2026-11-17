@@ -1,0 +1,179 @@
+// PlotColor -- colours and colormaps for the plot brick
+//
+// A colour is an Array [r, g, b] of integers 0..255. PlotColor rgb accepts the
+// colour specs matplotlib users know:
+//   "#1f77b4", "#abc"          hex
+//   "r", "g", "b", "c", "m", "y", "k", "w"
+//   "C0" .. "C9"               the default colour cycle (tab10)
+//   "tab:blue", "tab:orange"   tab10 by name
+//   "steelblue", "crimson"     common CSS colour names
+//   "0.5"                      a gray level, 0 black .. 1 white
+//   [0.2, 0.4, 0.6]            r, g, b in 0..1
+//
+// Colormaps map a number in 0..1 to a colour: viridis (the default), plasma,
+// inferno, magma, cividis, gray, binary, Greys, Blues, Reds, Greens, coolwarm,
+// RdBu. Add "_r" to reverse one ("gray_r").
+
+PlotColor = Object clone {
+    cycle = ["#1f77b4", "#ff7f0e", "#2ca02c", "#d62728", "#9467bd",
+             "#8c564b", "#e377c2", "#7f7f7f", "#bcbd22", "#17becf"]
+    _names = nil
+    _maps = nil
+    _luts = nil
+
+    // [r, g, b] in 0..255 for any colour spec above
+    rgb(spec) {
+        (spec == nil) ifTrue { return [0, 0, 0] }
+        (spec type == "Array") ifTrue {
+            (spec size < 3) ifTrue { raise("Plot: a colour array needs 3 numbers, r, g and b in 0..1") }
+            return [_channel(spec at(0)), _channel(spec at(1)), _channel(spec at(2))]
+        }
+        (spec type == "String") ifFalse { raise("Plot: not a colour: " + spec toString) }
+        s = spec trim lower
+        (s startsWith("#")) ifTrue { return _hex(s, spec) }
+        (s startsWith("tab:")) ifTrue {
+            i = ["blue", "orange", "green", "red", "purple", "brown", "pink", "gray", "olive", "cyan"] indexOf(s slice(4, s length))
+            (i == nil || i < 0) ifTrue { raise("Plot: unknown colour: " + spec) }
+            return _hex(cycle at(i), spec)
+        }
+        ((s length == 2) && (s at(0) == "c") && ("0123456789" contains(s at(1)))) ifTrue {
+            return _hex(cycle at(s at(1) toInt), spec)
+        }
+        (s test("^[0-9]*[.]?[0-9]+$")) ifTrue {
+            g = Math round(s toFloat clamp(0, 1) * 255)
+            return [g, g, g]
+        }
+        found = _nameTable get(s)
+        (found == nil) ifTrue { raise("Plot: unknown colour: " + spec) }
+        _hex(found, spec)
+    }
+
+    // "#rrggbb" for any colour spec
+    hex(spec) { toHex(rgb(spec)) }
+
+    // "#rrggbb" for an [r, g, b] array
+    toHex(c) { "#" + _byteHex(c at(0)) + _byteHex(c at(1)) + _byteHex(c at(2)) }
+
+    // The colour of the default cycle at index i (wraps around)
+    cycleColor(i) { cycle at(i % cycle size) }
+
+    // [r, g, b] for t in 0..1 along a colormap
+    colormap(name, t) {
+        stops = _stops(name)
+        t = t clamp(0, 1)
+        pos = t * (stops size - 1)
+        i = Math floor(pos) toInt
+        (i >= stops size - 1) ifTrue { return stops last }
+        f = pos - i
+        a = stops at(i)
+        b = stops at(i + 1)
+        [Math round(a at(0) + ((b at(0) - a at(0)) * f)),
+         Math round(a at(1) + ((b at(1) - a at(1)) * f)),
+         Math round(a at(2) + ((b at(2) - a at(2)) * f))]
+    }
+
+    // 256 "#rrggbb" strings sampled along a colormap, cached by name: index
+    // with Math round(t * 255)
+    lut(name) {
+        (_luts == nil) ifTrue { _luts = Dict clone }
+        cached = _luts get(name)
+        (cached != nil) ifTrue { return cached }
+        table = (0..255) map { |i| toHex(colormap(name, i / 255.0)) }
+        _luts set(name, table)
+        table
+    }
+
+    // The colormap names you can use (without the "_r" variants)
+    colormaps() { _mapTable keys }
+
+    _stops(name) {
+        (name == nil) ifTrue { name = "viridis" }
+        rev = name endsWith("_r")
+        base = rev ifTrue { name slice(0, name length - 2) } ifFalse { name }
+        hexes = _mapTable get(base)
+        (hexes == nil) ifTrue { raise("Plot: unknown colormap: " + name + " (try " + colormaps join(", ") + ")") }
+        stops = hexes map { |h| _hex(h, h) }
+        rev ifTrue { stops reverse } ifFalse { stops }
+    }
+
+    _channel(v) {
+        (v type == "Number") ifFalse { raise("Plot: colour channels are numbers in 0..1") }
+        Math round(v clamp(0, 1) * 255)
+    }
+
+    _hex(s, spec) {
+        digits = "0123456789abcdef"
+        h = s lower slice(1, s length)
+        (h length == 3) ifTrue { h = h at(0) + h at(0) + h at(1) + h at(1) + h at(2) + h at(2) }
+        (h length == 6) ifFalse { raise("Plot: bad hex colour: " + spec) }
+        (0..2) map { |i|
+            hi = digits indexOf(h at(i * 2))
+            lo = digits indexOf(h at((i * 2) + 1))
+            (hi < 0 || lo < 0) ifTrue { raise("Plot: bad hex colour: " + spec) }
+            (hi * 16) + lo
+        }
+    }
+
+    _byteHex(n) {
+        digits = "0123456789abcdef"
+        n = n clamp(0, 255) toInt
+        digits at(n / 16) + digits at(n % 16)
+    }
+
+    _nameTable() {
+        (_names == nil) ifTrue {
+            _names = #{
+                b: "#0000ff", g: "#008000", r: "#ff0000", c: "#00bfbf",
+                m: "#bf00bf", y: "#bfbf00", k: "#000000", w: "#ffffff",
+                black: "#000000", white: "#ffffff", gray: "#808080", grey: "#808080",
+                lightgray: "#d3d3d3", lightgrey: "#d3d3d3", darkgray: "#a9a9a9", darkgrey: "#a9a9a9",
+                dimgray: "#696969", silver: "#c0c0c0", red: "#ff0000", darkred: "#8b0000",
+                crimson: "#dc143c", tomato: "#ff6347", salmon: "#fa8072", orange: "#ffa500",
+                darkorange: "#ff8c00", gold: "#ffd700", yellow: "#ffff00", olive: "#808000",
+                green: "#008000", darkgreen: "#006400", lime: "#00ff00", limegreen: "#32cd32",
+                seagreen: "#2e8b57", teal: "#008080", cyan: "#00ffff", turquoise: "#40e0d0",
+                blue: "#0000ff", navy: "#000080", darkblue: "#00008b", royalblue: "#4169e1",
+                steelblue: "#4682b4", skyblue: "#87ceeb", lightblue: "#add8e6", dodgerblue: "#1e90ff",
+                purple: "#800080", indigo: "#4b0082", violet: "#ee82ee", magenta: "#ff00ff",
+                orchid: "#da70d6", pink: "#ffc0cb", hotpink: "#ff69b4", brown: "#a52a2a",
+                chocolate: "#d2691e", tan: "#d2b48c", beige: "#f5f5dc", ivory: "#fffff0",
+                whitesmoke: "#f5f5f5", none: "#000000"
+            }
+        }
+        _names
+    }
+
+    // 11 evenly spaced stops per map (sampled from matplotlib's tables); the
+    // colours in between are interpolated
+    _mapTable() {
+        (_maps == nil) ifTrue {
+            _maps = #{
+                viridis: ["#440154", "#482475", "#414487", "#355f8d", "#2a788e", "#21918c",
+                          "#22a884", "#44bf70", "#7ad151", "#bddf26", "#fde725"],
+                plasma: ["#0d0887", "#41049d", "#6a00a8", "#8f0da4", "#b12a90", "#cc4778",
+                         "#e16462", "#f2844b", "#fca636", "#fcce25", "#f0f921"],
+                inferno: ["#000004", "#160b39", "#420a68", "#6a176e", "#932667", "#bc3754",
+                          "#dd513a", "#f37819", "#fca50a", "#f6d746", "#fcffa4"],
+                magma: ["#000004", "#140e36", "#3b0f70", "#641a80", "#8c2981", "#b73779",
+                        "#de4968", "#f7705c", "#fe9f6d", "#fecf92", "#fcfdbf"],
+                cividis: ["#00224e", "#083370", "#35456c", "#4f576c", "#666970", "#7d7c78",
+                          "#948e77", "#aea371", "#c8b866", "#e5cf52", "#fee838"],
+                gray: ["#000000", "#ffffff"],
+                binary: ["#ffffff", "#000000"],
+                Greys: ["#ffffff", "#f0f0f0", "#d9d9d9", "#bdbdbd", "#969696", "#737373",
+                        "#525252", "#252525", "#000000"],
+                Blues: ["#f7fbff", "#deebf7", "#c6dbef", "#9ecae1", "#6baed6", "#4292c6",
+                        "#2171b5", "#08519c", "#08306b"],
+                Reds: ["#fff5f0", "#fee0d2", "#fcbba1", "#fc9272", "#fb6a4a", "#ef3b2c",
+                       "#cb181d", "#a50f15", "#67000d"],
+                Greens: ["#f7fcf5", "#e5f5e0", "#c7e9c0", "#a1d99b", "#74c476", "#41ab5d",
+                         "#238b45", "#006d2c", "#00441b"],
+                coolwarm: ["#3b4cc0", "#6788ee", "#9abbff", "#c9d7f0", "#edd1c2", "#f7a889",
+                           "#e26952", "#b40426"],
+                RdBu: ["#67001f", "#b2182b", "#d6604d", "#f4a582", "#fddbc7", "#f7f7f7",
+                       "#d1e5f0", "#92c5de", "#4393c3", "#2166ac", "#053061"]
+            }
+        }
+        _maps
+    }
+}

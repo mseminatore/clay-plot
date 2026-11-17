@@ -1,0 +1,186 @@
+// PlotFigure -- a figure: its size, a grid of axes, and saving
+//
+//   fig = PlotFigure new(#{figsize: [8, 4], dpi: 100})
+//   axs = fig subplots(1, 2)       // as matplotlib: one Axes, a row, or rows
+//   axs at(0) plot([1, 4, 9])
+//   fig savefig("out.svg")
+//
+// Layout is automatic: each axes gets the room its tick labels, axis labels
+// and title need (like matplotlib's tight layout), and axes in one grid
+// column (or row) are lined up with each other.
+
+PlotFigure = Object clone {
+    widthIn = 6.4
+    heightIn = 4.8
+    dpi = 100
+    facecolor = "#ffffff"
+    axesList = nil
+    suptitleText = nil
+    suptitleSize = nil
+
+    init(opts = nil) {
+        o = opts ?? #{}
+        size = o get("figsize") ?? Plot rc get("figure.figsize")
+        self widthIn = size at(0)
+        self heightIn = size at(1)
+        self dpi = o get("dpi") ?? Plot rc get("figure.dpi")
+        self facecolor = PlotColor hex(o get("facecolor") ?? Plot rc get("figure.facecolor"))
+        self axesList = []
+    }
+
+    // Width and height in pixels
+    width() { Math round(widthIn * dpi) }
+    height() { Math round(heightIn * dpi) }
+
+    // Replace the axes with a rows x cols grid. Returns them as matplotlib
+    // does: one Axes for 1 x 1, an Array for a single row or column, else an
+    // Array of rows. fig axes is always the flat list.
+    subplots(rows = 1, cols = 1) {
+        self axesList = []
+        grid = []
+        rows times { |r|
+            row = []
+            cols times { |c|
+                ax = PlotAxes new(self, [rows, cols, r, c])
+                axesList append(ax)
+                row append(ax)
+            }
+            grid append(row)
+        }
+        ((rows == 1) && (cols == 1)) ifTrue { return grid first first }
+        (rows == 1) ifTrue { return grid first }
+        (cols == 1) ifTrue { return grid map { |row| row first } }
+        grid
+    }
+
+    // The axes at position index (1-based, left to right then down) of a
+    // rows x cols grid, made if it isn't there yet (matplotlib's add_subplot)
+    addSubplot(rows = 1, cols = 1, index = 1) {
+        (index < 1 || index > rows * cols) ifTrue { raise("Plot: subplot index " + index toString + " is outside a " + rows toString + " x " + cols toString + " grid") }
+        r = (index - 1) / cols
+        c = (index - 1) % cols
+        where = [rows, cols, r, c]
+        found = axesList find { |ax| ax cell == where }
+        (found != nil) ifTrue { return found }
+        ax = PlotAxes new(self, where)
+        axesList append(ax)
+        ax
+    }
+
+    // All the axes, in the order they were made
+    axes() { axesList }
+
+    // The axes at row r, column c (0-based) of a subplots grid
+    ax(r = 0, c = 0) {
+        axesList find { |a| (a cell at(2) == r) && (a cell at(3) == c) }
+    }
+
+    suptitle(s, opts = nil) {
+        self suptitleText = s
+        self suptitleSize = (opts == nil) ifTrue { nil } ifFalse { opts get("fontsize") }
+        self
+    }
+
+    // Remove all axes
+    clear() { self axesList = []; self suptitleText = nil; self }
+
+    // Save to a file; the extension picks the format (.svg)
+    savefig(path, opts = nil) {
+        dot = path lastIndexOf(".")
+        ext = ((dot == nil) || (dot < 0)) ifTrue { "" } ifFalse { path slice(dot + 1, path length) lower }
+        (ext == "svg") ifTrue {
+            File write(path, toSvg)
+            return path
+        }
+        (ext == "png") ifTrue { raise("Plot: PNG output is not available yet; save as .svg for now") }
+        raise("Plot: savefig can't write \"" + path + "\": use a .svg file name")
+    }
+
+    // The figure as an SVG document (a String), e.g. to serve from a web app
+    toSvg() {
+        cv = PlotSvg new(width, height, facecolor)
+        render(cv)
+        cv finish
+    }
+
+    // Save to a temporary file and open it in the system's viewer; returns
+    // the file's path
+    show() {
+        path = File tempDir + "/figure.svg"
+        savefig(path)
+        platform = System platform
+        cmd = (platform == "windows") ifTrue { ["cmd", "/c", "start", "", path] } ifFalse {
+            (platform == "macos") ifTrue { ["open", path] } ifFalse { ["xdg-open", path] }
+        }
+        try { Process run(cmd) } catch { |e| ("Plot: couldn't open a viewer; the figure is at " + path) println }
+        path
+    }
+
+    // Lay out the axes and draw everything on a canvas (any backend)
+    render(cv) {
+        w = width
+        h = height
+        pt = dpi / 72.0
+        pad = 6 * pt
+        top = pad
+        (suptitleText != nil) ifTrue {
+            size = (suptitleSize ?? Plot rc get("figure.titlesize")) * pt
+            cv text(w / 2, pad, suptitleText, #{size: size, anchor: "middle", valign: "top"})
+            top = top + (size * 1.4)
+        }
+        (axesList size == 0) ifTrue { return cv }
+        areaX = pad
+        areaY = top
+        areaW = w - (pad * 2)
+        areaH = h - top - pad
+        // each axes' cell and the margins it asks for
+        cells = axesList map { |ax|
+            g = ax cell
+            cw = areaW / g at(1)
+            ch = areaH / g at(0)
+            [areaX + (g at(3) * cw), areaY + (g at(2) * ch), cw, ch]
+        }
+        gapX = 10 * pt
+        gapY = 10 * pt
+        margins = []
+        axesList size times { |i|
+            c = cells at(i)
+            margins append(axesList at(i) _margins(cv, c at(2) * 0.8, c at(3) * 0.8))
+        }
+        // line up axes that share a grid column (left, right) or row (top, bottom)
+        axesList size times { |i|
+            gi = axesList at(i) cell
+            m = margins at(i)
+            l = m at(0)
+            t = m at(1)
+            r = m at(2)
+            b = m at(3)
+            axesList size times { |j|
+                gj = axesList at(j) cell
+                ((gj at(0) == gi at(0)) && (gj at(1) == gi at(1))) ifTrue {
+                    (gj at(3) == gi at(3)) ifTrue {
+                        l = Math max(l, margins at(j) at(0))
+                        r = Math max(r, margins at(j) at(2))
+                    }
+                    (gj at(2) == gi at(2)) ifTrue {
+                        t = Math max(t, margins at(j) at(1))
+                        b = Math max(b, margins at(j) at(3))
+                    }
+                }
+            }
+            c = cells at(i)
+            sepX = (gi at(1) > 1) ifTrue { gapX / 2 } ifFalse { 0 }
+            sepY = (gi at(0) > 1) ifTrue { gapY / 2 } ifFalse { 0 }
+            box = [c at(0) + l + sepX, c at(1) + t + sepY,
+                   c at(2) - l - r - (sepX * 2), c at(3) - t - b - (sepY * 2)]
+            axesList at(i) _place(cv, box)
+        }
+        axesList each { |ax| ax draw(cv) }
+        cv
+    }
+
+    toString() {
+        (self == PlotFigure) ifTrue { return "PlotFigure" }
+        "Figure(" + width toString + " x " + height toString + ", " + axesList size toString + " axes)"
+    }
+}

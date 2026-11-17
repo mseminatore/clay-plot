@@ -1,0 +1,244 @@
+// Tests for the plot brick. Run them from the brick's directory:
+//   clay tests/test_plot.clay
+// (a brick can be imported by its own name from inside its own directory)
+// They use stdlib/test, which comes with Clay: `Test run` prints a summary
+// and exits with status 1 if any test failed.
+import("plot")
+import("stdlib/test")
+
+minus = "\xe2\x88\x92"
+count = { |s, sub| (s split(sub) size) - 1 }
+
+Test describe("PlotTicks") {
+    Test it("finds the power of ten") {
+        Test assertEqual(PlotTicks exponent(1), 0)
+        Test assertEqual(PlotTicks exponent(999), 2)
+        Test assertEqual(PlotTicks exponent(1000), 3)
+        Test assertEqual(PlotTicks exponent(0.05), -2)
+        Test assertEqual(PlotTicks exponent(0), 0)
+    }
+    Test it("places ticks on 1, 2, 2.5 or 5 times a power of ten") {
+        t = PlotTicks locate(0, 10, 5)
+        Test assertEqual(t get("values") map { |v| Math round(v) }, [0, 2, 4, 6, 8, 10])
+        Test assertEqual(t get("decimals"), 0)
+        t = PlotTicks locate(0, 1, 4)
+        Test assertEqual(PlotTicks labels(t get("values"), t get("decimals")), ["0.00", "0.25", "0.50", "0.75", "1.00"])
+        t = PlotTicks locate(0, 175, 7)
+        Test assertEqual(PlotTicks labels(t get("values"), t get("decimals")), ["0", "25", "50", "75", "100", "125", "150", "175"])
+    }
+    Test it("keeps ticks inside the range") {
+        t = PlotTicks locate(-0.83, 2.1, 8)
+        Test assertEqual(PlotTicks labels(t get("values"), t get("decimals")), [minus + "0.5", "0.0", "0.5", "1.0", "1.5", "2.0"])
+    }
+    Test it("uses whole steps for integer axes") {
+        t = PlotTicks locate(-0.5, 2.5, 8, true)
+        Test assertEqual(t get("values") map { |v| Math round(v) }, [0, 1, 2])
+    }
+    Test it("formats numbers") {
+        Test assertEqual(PlotTicks format(3.14159, 2), "3.14")
+        Test assertEqual(PlotTicks format(-2.5, 1), minus + "2.5")
+        Test assertEqual(PlotTicks format(-0.001, 2), "0.00")
+        Test assertEqual(PlotTicks format(7, 0), "7")
+        Test assertEqual(PlotTicks short(0.30000001), "0.3")
+        Test assertEqual(PlotTicks short(12), "12")
+    }
+    Test it("labels big numbers with an exponent") {
+        Test assertEqual(PlotTicks labels([0, 2000000, 4000000], 0), ["0", "2e6", "4e6"])
+    }
+}
+
+Test describe("PlotColor") {
+    Test it("reads colour specs") {
+        Test assertEqual(PlotColor rgb("#ff8000"), [255, 128, 0])
+        Test assertEqual(PlotColor rgb("#f80"), [255, 136, 0])
+        Test assertEqual(PlotColor hex("r"), "#ff0000")
+        Test assertEqual(PlotColor hex("C1"), "#ff7f0e")
+        Test assertEqual(PlotColor hex("tab:green"), "#2ca02c")
+        Test assertEqual(PlotColor hex("SteelBlue"), "#4682b4")
+        Test assertEqual(PlotColor hex("0.5"), "#808080")
+        Test assertEqual(PlotColor hex([1, 0, 0.5]), "#ff0080")
+    }
+    Test it("rejects unknown colours") {
+        e = Test assertRaises({ PlotColor rgb("blurple") })
+        Test assertTrue(e message contains("unknown colour"))
+        Test assertRaises({ PlotColor rgb("#12345") })
+    }
+    Test it("cycles the default colours") {
+        Test assertEqual(PlotColor cycleColor(0), "#1f77b4")
+        Test assertEqual(PlotColor cycleColor(10), "#1f77b4")
+    }
+    Test it("maps numbers through colormaps") {
+        Test assertEqual(PlotColor colormap("viridis", 0), [68, 1, 84])
+        Test assertEqual(PlotColor colormap("viridis", 1), [253, 231, 37])
+        Test assertEqual(PlotColor colormap("gray", 0.5), [128, 128, 128])
+        Test assertEqual(PlotColor colormap("gray_r", 0), [255, 255, 255])
+        Test assertEqual(PlotColor lut("viridis") size, 256)
+        Test assertRaises({ PlotColor colormap("nope", 0) })
+    }
+}
+
+Test describe("PlotAxes") {
+    Test it("plots ys against their index") {
+        Plot close
+        line = Plot plot([1, 4, 9])
+        Test assertEqual(line get("xs"), [0, 1, 2])
+        Test assertEqual(line get("color"), "#1f77b4")
+        Test assertEqual(Plot plot([1, 2]) get("color"), "#ff7f0e")
+    }
+    Test it("reads format strings") {
+        Plot close
+        a = Plot plot([1, 2], [3, 4], "r--")
+        Test assertEqual(a get("color"), "#ff0000")
+        Test assertEqual(a get("linestyle"), "--")
+        b = Plot plot([1, 2], "o")
+        Test assertEqual(b get("marker"), "o")
+        Test assertEqual(b get("linestyle"), "none")
+        c = Plot plot([1, 2], "g^-.", #{label: "c"})
+        Test assertEqual([c get("color"), c get("marker"), c get("linestyle"), c get("label")], ["#008000", "^", "-.", "c"])
+        e = Test assertRaises({ Plot plot([1, 2], "q") })
+        Test assertTrue(e message contains("format string"))
+    }
+    Test it("plots one line per column of rows") {
+        Plot close
+        lines = Plot plot([[1, 10], [2, 20], [3, 30]], #{label: ["a", "b"]})
+        Test assertEqual(lines size, 2)
+        Test assertEqual(lines at(1) get("ys"), [10, 20, 30])
+        Test assertEqual(lines at(1) get("label"), "b")
+    }
+    Test it("checks lengths") {
+        Plot close
+        e = Test assertRaises({ Plot plot([1, 2, 3], [1, 2]) })
+        Test assertTrue(e message contains("same length"))
+    }
+    Test it("autoscales with a 5% margin") {
+        Plot close
+        Plot plot([0, 10], [0, 100])
+        Test assertEqual(Plot xlim map { |v| Math round(v * 10) }, [-5, 105])
+        Test assertEqual(Plot ylim map { |v| Math round(v) }, [-5, 105])
+    }
+    Test it("keeps bars on zero") {
+        Plot close
+        Plot bar([1, 2, 3], [5, 10, 20])
+        Test assertEqual(Plot ylim at(0), 0)
+    }
+    Test it("honours xlim and ylim") {
+        Plot close
+        Plot plot([0, 10], [0, 100])
+        Plot xlim(2, 4)
+        Plot ylim([nil, 50])
+        Test assertEqual(Plot xlim, [2, 4])
+        Test assertEqual(Plot ylim at(1), 50)
+    }
+    Test it("labels bars given as strings") {
+        Plot close
+        bars = Plot bar(["a", "b", "c"], [1, 2, 3])
+        Test assertEqual(bars get("pos"), [0, 1, 2])
+        Test assertEqual(Plot gca xtickSpec get("labels"), ["a", "b", "c"])
+    }
+    Test it("counts a histogram") {
+        Plot close
+        [counts, edges, art] = Plot hist([1, 2, 2, 3, 3, 3, 4], 3)
+        Test assertEqual(counts, [1, 2, 4])
+        Test assertEqual(edges size, 4)
+        [n, e2, a2] = Plot hist([0, 1, 5, 9, 10], [0, 5, 10])
+        Test assertEqual(n, [2, 3])
+        [d, e3, a3] = Plot hist([0, 1, 2, 3], #{bins: 2, density: true})
+        Test assertEqual(d map { |v| Math round(v * 100) }, [33, 33])
+    }
+    Test it("shapes images") {
+        Plot close
+        img = Plot imshow((1..784) toArray)
+        Test assertEqual([img get("nrows"), img get("ncols")], [28, 28])
+        img = Plot imshow((1..6) toArray, #{shape: [2, 3]})
+        Test assertEqual(img get("rows"), [[1, 2, 3], [4, 5, 6]])
+        Test assertEqual([img get("vmin"), img get("vmax")], [1, 6])
+        Test assertRaises({ Plot imshow((1..6) toArray) })
+    }
+    Test it("names artists for the legend") {
+        Plot close
+        a = Plot plot([1, 2])
+        b = Plot plot([2, 1])
+        Plot legend(["up", "down"])
+        Test assertEqual([a get("label"), b get("label")], ["up", "down"])
+    }
+}
+
+Test describe("PlotFigure") {
+    Test it("returns subplots as matplotlib does") {
+        [fig, ax] = Plot subplots
+        Test assertEqual(ax type, "PlotAxes")
+        [fig, row] = Plot subplots(1, 3)
+        Test assertEqual(row size, 3)
+        [fig, grid] = Plot subplots(2, 3)
+        Test assertEqual([grid size, grid first size], [2, 3])
+        Test assertEqual(fig axes size, 6)
+        Test assertEqual(fig ax(1, 2), grid at(1) at(2))
+        Plot close
+    }
+    Test it("finds subplots by index") {
+        Plot close
+        a = Plot subplot(2, 1, 1)
+        b = Plot subplot(2, 1, 2)
+        Test assertEqual(Plot subplot(2, 1, 1), a)
+        Test assertEqual(Plot gca, a)
+        Test assertEqual(Plot gcf axes size, 2)
+        Test assertRaises({ Plot subplot(2, 1, 3) })
+    }
+    Test it("sizes figures in inches times dpi") {
+        fig = Plot figure(#{figsize: [4, 3], dpi: 50})
+        Test assertEqual([fig width, fig height], [200, 150])
+        Plot close
+    }
+}
+
+Test describe("SVG output") {
+    Test it("draws a complete document") {
+        Plot close
+        Plot plot([1, 2, 3], [4, 5, 6], "o-", #{label: "data"})
+        Plot title("A & B < C")
+        Plot xlabel("x")
+        Plot legend
+        svg = Plot toSvg
+        Test assertTrue(svg startsWith("<?xml"))
+        Test assertTrue(svg endsWith("</svg>\n"))
+        Test assertTrue(svg contains("width=\"640\" height=\"480\""))
+        Test assertTrue(svg contains("A &amp; B &lt; C"))
+        Test assertTrue(svg contains("<polyline"))
+        Test assertEqual(count value(svg, "<circle"), 4)   // 3 points + the legend's marker
+        Test assertTrue(svg contains(">data</text>"))
+    }
+    Test it("draws image cells, merging runs of one colour") {
+        Plot close
+        Plot imshow([[0, 0, 0], [1, 1, 1]], #{cmap: "gray"})
+        Plot axis("off")
+        svg = Plot toSvg
+        Test assertEqual(count value(svg, "fill=\"#000000\"/>"), 1)
+        Test assertEqual(count value(svg, "fill=\"#ffffff\"/>"), 2)   // the cells and the background
+    }
+    Test it("hides ticks given an empty list") {
+        Plot close
+        Plot plot([1, 2])
+        Plot xticks([])
+        Plot yticks([])
+        Test assertFalse(Plot toSvg contains("text-anchor=\"middle\" "))
+    }
+    Test it("saves .svg files and refuses other formats") {
+        Plot close
+        Plot plot([1, 2])
+        dir = File tempDir
+        path = dir + "/out.svg"
+        Plot savefig(path)
+        Test assertTrue(File read(path) contains("<svg"))
+        File delete(path)
+        File delete(dir)
+        e = Test assertRaises({ Plot savefig("x.png") })
+        Test assertTrue(e message contains("PNG"))
+        Test assertRaises({ Plot savefig("x.pdf") })
+    }
+    Test it("draws an empty figure") {
+        Plot close
+        Test assertTrue(PlotFigure new toSvg contains("</svg>"))
+    }
+}
+
+Test run

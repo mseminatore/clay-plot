@@ -1,0 +1,150 @@
+// plot -- charts and figures for Clay, in the style of matplotlib's pyplot
+//
+// Usage:
+//   import("plot")
+//
+//   Plot plot([1, 4, 9, 16], #{label: "squares"})
+//   Plot plot([1, 2, 3, 4], "r--", #{label: "linear"})
+//   Plot title("Growth"); Plot xlabel("n"); Plot legend
+//   Plot savefig("growth.svg")
+//
+//   [fig, axs] = Plot subplots(1, 2, #{figsize: [10, 4]})
+//   axs at(0) hist(values, 20)
+//   axs at(1) imshow(pixels, #{cmap: "gray"})
+//   fig savefig("panels.svg")
+//
+// Plot keeps a current figure and axes, as pyplot does; the drawing methods
+// (plot, scatter, bar, hist, imshow ...) go to the current axes. Figures and
+// axes can also be used directly: PlotFigure, PlotAxes. Colours and
+// colormaps are in PlotColor, tick placement in PlotTicks, and the SVG
+// backend is PlotSvg.
+//
+// Every brick shares one set of top-level names with the program that imports
+// it, so this one's all start with Plot.
+
+import("color.clay")
+import("ticks.clay")
+import("svg.clay")
+import("axes.clay")
+import("figure.clay")
+
+Plot = Object clone {
+    current = nil
+    currentAxes = nil
+    _rc = nil
+
+    // Default settings, named as matplotlib's rcParams; change them before
+    // making a figure: Plot rc set("font.size", 12)
+    rc() {
+        (_rc == nil) ifTrue {
+            _rc = #{
+                "figure.figsize": [6.4, 4.8], "figure.dpi": 100, "figure.facecolor": "white",
+                "figure.titlesize": 12,
+                "font.size": 10, "axes.titlesize": 12, "axes.labelsize": 10,
+                "xtick.labelsize": 10, "ytick.labelsize": 10, "legend.fontsize": 10,
+                "axes.linewidth": 0.8, "axes.grid": false, "axes.facecolor": "white",
+                "axes.xmargin": 0.05, "axes.ymargin": 0.05,
+                "lines.linewidth": 1.5, "lines.markersize": 6,
+                "grid.color": "#b0b0b0", "grid.linewidth": 0.8, "grid.alpha": 1,
+                "image.cmap": "viridis"
+            }
+        }
+        _rc
+    }
+
+    // ---- figures ----------------------------------------------------------
+
+    // A new figure, now the current one: figure(#{figsize: [w, h] in inches,
+    // dpi:, facecolor:})
+    figure(opts = nil) {
+        self current = PlotFigure new(opts)
+        self currentAxes = nil
+        current
+    }
+
+    // A new figure with a grid of axes: [fig, axs] = Plot subplots(2, 2).
+    // axs is one Axes, an Array (one row or column) or an Array of rows.
+    subplots(rows = 1, cols = 1, opts = nil) {
+        (rows type == "Dict") ifTrue { opts = rows; rows = 1 }
+        (cols type == "Dict") ifTrue { opts = cols; cols = 1 }
+        fig = figure(opts)
+        axs = fig subplots(rows, cols)
+        self currentAxes = fig axesList first
+        [fig, axs]
+    }
+
+    // Make the subplot at index (1-based) of a rows x cols grid current,
+    // creating it if needed: Plot subplot(1, 2, 1)
+    subplot(rows, cols, index) {
+        self currentAxes = gcf addSubplot(rows, cols, index)
+        currentAxes
+    }
+
+    // The current figure, made if there is none
+    gcf() {
+        (current == nil) ifTrue { figure }
+        current
+    }
+
+    // The current axes, made if there are none
+    gca() {
+        fig = gcf
+        (currentAxes == nil) ifTrue {
+            self currentAxes = (fig axesList size > 0) ifTrue { fig axesList first } ifFalse { fig addSubplot(1, 1, 1) }
+        }
+        currentAxes
+    }
+
+    // Make an axes current
+    sca(ax) { self currentAxes = ax; self current = ax figure; ax }
+
+    // ---- drawing (on the current axes) -------------------------------------
+
+    plot(a = nil, b = nil, c = nil, d = nil) { gca plot(a, b, c, d) }
+    scatter(x, y, opts = nil) { gca scatter(x, y, opts) }
+    bar(x, height, opts = nil) { gca bar(x, height, opts) }
+    barh(y, width, opts = nil) { gca barh(y, width, opts) }
+    hist(data, bins = nil, opts = nil) { gca hist(data, bins, opts) }
+    fillBetween(x, y1, y2 = nil, opts = nil) { gca fillBetween(x, y1, y2, opts) }
+    axhline(y = 0, opts = nil) { gca axhline(y, opts) }
+    axvline(x = 0, opts = nil) { gca axvline(x, opts) }
+    text(x, y, s, opts = nil) { gca text(x, y, s, opts) }
+    imshow(data, opts = nil) { gca imshow(data, opts) }
+    colorbar(art = nil, opts = nil) { gca colorbar(art, opts) }
+
+    // ---- labels and settings (on the current axes) ------------------------
+
+    title(s, opts = nil) { gca title(s, opts) }
+    xlabel(s) { gca xlabel(s) }
+    ylabel(s) { gca ylabel(s) }
+    xlim(lo = nil, hi = nil) { gca xlim(lo, hi) }
+    ylim(lo = nil, hi = nil) { gca ylim(lo, hi) }
+    xticks(values = nil, labels = nil, opts = nil) { gca xticks(values, labels, opts) }
+    yticks(values = nil, labels = nil, opts = nil) { gca yticks(values, labels, opts) }
+    grid(on = true, opts = nil) { gca grid(on, opts) }
+    legend(a = nil, b = nil) { gca legend(a, b) }
+    axis(mode) { gca axis(mode) }
+    suptitle(s, opts = nil) { gcf suptitle(s, opts) }
+
+    // ---- output -----------------------------------------------------------
+
+    // Save the current figure; the extension picks the format (.svg)
+    savefig(path, opts = nil) { gcf savefig(path, opts) }
+
+    // The current figure as SVG text
+    toSvg() { gcf toSvg }
+
+    // Open the current figure in the system viewer, then start afresh (as
+    // pyplot's show); returns the temporary file's path
+    show() {
+        path = gcf show
+        close
+        path
+    }
+
+    // Forget the current figure
+    close() { self current = nil; self currentAxes = nil; nil }
+
+    // Clear the current figure's axes
+    clf() { gcf clear; self currentAxes = nil; nil }
+}

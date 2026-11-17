@@ -1,0 +1,6 @@
+# bricks installed by `clay bricks install`
+bricks/
+# figures written by the examples
+examples/out/
+# clay --compile output
+*.exe

@@ -1,0 +1,193 @@
+// PlotSvg -- the SVG backend: draws plot primitives as an SVG document
+//
+// Figures draw through a small set of primitives, so another backend (PNG,
+// terminal) only has to provide the same methods:
+//   line(x1, y1, x2, y2, style)       polyline(xs, ys, style)
+//   polygon(xs, ys, style)            rect(x, y, w, h, style)
+//   circle(cx, cy, r, style)          text(x, y, string, style)
+//   pixels(x, y, w, h, rows)          rows of "#rrggbb" strings, drawn as cells
+//   clip(x, y, w, h) / unclip         clip what follows to a rectangle
+//   measure(string, size)             a text's width in pixels
+// Coordinates are pixels from the top left. A style is a Dict: stroke, fill
+// ("#rrggbb" or nil for none), width (px), dash (Array of px), alpha (0..1),
+// cap, join. Text styles: size (px), color, anchor ("start", "middle",
+// "end"), valign ("baseline", "center", "top", "bottom"), rotate (degrees,
+// counter-clockwise), weight.
+
+PlotSvg = Object clone {
+    width = 0
+    height = 0
+    parts = nil
+    clips = 0
+    family = "DejaVu Sans, Arial, Helvetica, sans-serif"
+
+    init(w, h, background = "#ffffff") {
+        self width = w
+        self height = h
+        self parts = []
+        self clips = 0
+        parts append("<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n")
+        parts append("<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"" + num(w) + "\" height=\"" + num(h) +
+            "\" viewBox=\"0 0 " + num(w) + " " + num(h) + "\" font-family=\"" + family + "\">\n")
+        (background != nil) ifTrue {
+            parts append("<rect width=\"100%\" height=\"100%\" fill=\"" + background + "\"/>\n")
+        }
+    }
+
+    // The finished document
+    finish() { parts join("") + "</svg>\n" }
+
+    line(x1, y1, x2, y2, style) {
+        parts append("<line x1=\"" + num(x1) + "\" y1=\"" + num(y1) + "\" x2=\"" + num(x2) + "\" y2=\"" + num(y2) + "\"" + attrs(style) + "/>\n")
+    }
+
+    polyline(xs, ys, style) {
+        (xs size < 2) ifTrue { return nil }
+        parts append("<polyline points=\"" + points(xs, ys) + "\"" + attrs(style) + "/>\n")
+    }
+
+    polygon(xs, ys, style) {
+        (xs size < 3) ifTrue { return nil }
+        parts append("<polygon points=\"" + points(xs, ys) + "\"" + attrs(style) + "/>\n")
+    }
+
+    rect(x, y, w, h, style) {
+        (w < 0) ifTrue { x = x + w; w = 0 - w }
+        (h < 0) ifTrue { y = y + h; h = 0 - h }
+        parts append("<rect x=\"" + num(x) + "\" y=\"" + num(y) + "\" width=\"" + num(w) + "\" height=\"" + num(h) + "\"" + attrs(style) + "/>\n")
+    }
+
+    circle(cx, cy, r, style) {
+        parts append("<circle cx=\"" + num(cx) + "\" cy=\"" + num(cy) + "\" r=\"" + num(r) + "\"" + attrs(style) + "/>\n")
+    }
+
+    text(x, y, s, style) {
+        size = style get("size") ?? 12
+        dy = _baselineShift(style get("valign"), size)
+        rot = style get("rotate") ?? 0
+        a = " font-size=\"" + num(size) + "\""
+        anchor = style get("anchor") ?? "start"
+        (anchor != "start") ifTrue { a = a + " text-anchor=\"" + anchor + "\"" }
+        color = style get("color") ?? "#000000"
+        (color != "#000000") ifTrue { a = a + " fill=\"" + color + "\"" }
+        (style get("weight") != nil) ifTrue { a = a + " font-weight=\"" + style get("weight") + "\"" }
+        (style get("alpha") != nil) ifTrue { a = a + " fill-opacity=\"" + num(style get("alpha")) + "\"" }
+        (rot == 0) ifTrue {
+            parts append("<text x=\"" + num(x) + "\" y=\"" + num(y + dy) + "\"" + a + ">" + escape(s) + "</text>\n")
+        } ifFalse {
+            parts append("<text transform=\"translate(" + num(x) + " " + num(y) + ") rotate(" + num(0 - rot) + ")\" y=\"" + num(dy) + "\"" + a + ">" + escape(s) + "</text>\n")
+        }
+    }
+
+    // A grid of cells, rows top to bottom, each row an Array of "#rrggbb"
+    // (or nil to leave a cell empty). Neighbouring cells of one colour are
+    // drawn as one rectangle.
+    pixels(x, y, w, h, rows) {
+        nr = rows size
+        (nr == 0) ifTrue { return nil }
+        nc = rows at(0) size
+        cw = w / nc toFloat
+        ch = h / nr toFloat
+        parts append("<g shape-rendering=\"crispEdges\">\n")
+        nr times { |r|
+            row = rows at(r)
+            y0 = y + (r * ch)
+            c = 0
+            { c < nc } whileTrue {
+                color = row at(c)
+                run = 1
+                { (c + run < nc) && (row at(c + run) == color) } whileTrue { run = run + 1 }
+                (color != nil) ifTrue {
+                    parts append("<rect x=\"" + num(x + (c * cw)) + "\" y=\"" + num(y0) + "\" width=\"" + num((run * cw) + 0.01) + "\" height=\"" + num(ch + 0.01) + "\" fill=\"" + color + "\"/>\n")
+                }
+                c = c + run
+            }
+        }
+        parts append("</g>\n")
+    }
+
+    clip(x, y, w, h) {
+        clips = clips + 1
+        id = "clip" + clips toString
+        parts append("<clipPath id=\"" + id + "\"><rect x=\"" + num(x) + "\" y=\"" + num(y) + "\" width=\"" + num(w) + "\" height=\"" + num(h) + "\"/></clipPath>\n")
+        parts append("<g clip-path=\"url(#" + id + ")\">\n")
+    }
+
+    unclip() { parts append("</g>\n") }
+
+    // Estimated width in pixels of a string drawn at a font size, from
+    // typical sans-serif character widths (SVG text is measured by whoever
+    // renders it, so this only has to be close enough for layout)
+    measure(s, size) {
+        (s == nil) ifTrue { return 0 }
+        total = 0.0
+        s toString bytes each { |b|
+            (b >= 128 && b < 192) ifTrue { continue }
+            total = total + _charWidth(b)
+        }
+        total * size
+    }
+
+    _charWidth(b) {
+        (b >= 192) ifTrue { return 0.62 }
+        (b == 32) ifTrue { return 0.32 }
+        (b >= 48 && b <= 57) ifTrue { return 0.64 }
+        ch = String chr(b)
+        ("iljI.,:;'|!" contains(ch)) ifTrue { return 0.3 }
+        ("frt()[]-" contains(ch)) ifTrue { return 0.4 }
+        ("mwMW" contains(ch)) ifTrue { return 0.92 }
+        (b >= 65 && b <= 90) ifTrue { return 0.72 }
+        0.6
+    }
+
+    // How far below the given y the baseline goes for a vertical alignment
+    _baselineShift(valign, size) {
+        (valign == "center") ifTrue { return size * 0.36 }
+        (valign == "top") ifTrue { return size * 0.76 }
+        (valign == "bottom") ifTrue { return 0 - (size * 0.24) }
+        0
+    }
+
+    attrs(style) {
+        (style == nil) ifTrue { return "" }
+        stroke = style get("stroke")
+        fill = style get("fill")
+        a = " fill=\"" + (fill ?? "none") + "\""
+        (stroke != nil) ifTrue {
+            a = a + " stroke=\"" + stroke + "\" stroke-width=\"" + num(style get("width") ?? 1) + "\""
+            dash = style get("dash")
+            (dash != nil && dash size > 0) ifTrue {
+                a = a + " stroke-dasharray=\"" + (dash map { |d| num(d) }) join(" ") + "\""
+            }
+            (style get("cap") != nil) ifTrue { a = a + " stroke-linecap=\"" + style get("cap") + "\"" }
+            (style get("join") != nil) ifTrue { a = a + " stroke-linejoin=\"" + style get("join") + "\"" }
+        }
+        alpha = style get("alpha")
+        (alpha != nil && alpha < 1) ifTrue { a = a + " opacity=\"" + num(alpha) + "\"" }
+        a
+    }
+
+    points(xs, ys) {
+        out = []
+        xs size times { |i| out append(num(xs at(i)) + "," + num(ys at(i))) }
+        out join(" ")
+    }
+
+    // A coordinate as text: at most 2 decimals, trailing zeros dropped
+    num(v) {
+        n = Math round(v * 100)
+        neg = n < 0
+        n = n abs
+        whole = n / 100
+        frac = n % 100
+        text = whole toString
+        (frac != 0) ifTrue {
+            text = text + "." + ((frac % 10 == 0) ifTrue { (frac / 10) toString } ifFalse { frac toString padLeft(2, "0") })
+        }
+        (neg && n != 0) ifTrue { "-" + text } ifFalse { text }
+    }
+
+    escape(s) {
+        s toString replace("&", "&amp;") replace("<", "&lt;") replace(">", "&gt;") replace("\"", "&quot;")
+    }
+}

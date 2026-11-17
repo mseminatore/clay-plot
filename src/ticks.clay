@@ -1,0 +1,116 @@
+// PlotTicks -- where ticks go on an axis and how their labels read
+//
+//   PlotTicks locate(0, 0.83, 8)   // #{values: [0, 0.1, ... 0.8], step: 0.1, decimals: 1}
+//   PlotTicks labels([0, 0.5, 1], 1)   // ["0.0", "0.5", "1.0"]
+//   PlotTicks format(-2.5, 2)          // "−2.50" (with a real minus sign, as matplotlib)
+//
+// Ticks fall on multiples of 1, 2, 2.5 or 5 times a power of ten, the steps
+// matplotlib's MaxNLocator uses, choosing the smallest step that gives at most
+// maxTicks intervals across the range.
+//
+// Clay's floats are 32-bit, so values are worked out as an integer count of
+// steps and formatted by rounding to a fixed number of decimals, never by
+// printing a float as it is.
+
+PlotTicks = Object clone {
+    minus = "\xe2\x88\x92"
+
+    // e such that 10^e <= |x| < 10^(e+1); 0 for 0
+    exponent(x) {
+        v = x abs toFloat
+        (v == 0) ifTrue { return 0 }
+        e = 0
+        { v >= 9.99999 } whileTrue { v = v / 10; e = e + 1 }
+        { v < 0.999999 } whileTrue { v = v * 10; e = e - 1 }
+        e
+    }
+
+    // 10^e as a float (e an integer, either sign)
+    pow10(e) { Math pow(10, e) toFloat }
+
+    // Ticks inside [lo, hi]: #{values:, step:, decimals:}. integer: true
+    // keeps the step a whole number (for pixel and category axes).
+    locate(lo, hi, maxTicks = 8, integer = false) {
+        (hi < lo) ifTrue { t = lo; lo = hi; hi = t }
+        span = (hi - lo) toFloat
+        (span <= 0) ifTrue { span = (lo == 0) ifTrue { 1.0 } ifFalse { lo abs } }
+        n = Math max(maxTicks, 1)
+        raw = span / n
+        e = exponent(raw)
+        mag = pow10(e)
+        f = raw / mag
+        mult = [1, 2, 2.5, 5, 10] find { |m| m >= (f - 0.00001) }
+        (mult == 10) ifTrue { mult = 1; e = e + 1; mag = pow10(e) }
+        (integer && (e < 0)) ifTrue { mult = 1; e = 0; mag = 1.0 }
+        (integer && (mult == 2.5)) ifTrue { mult = 5 }
+        step = mult * mag
+        k0 = Math ceil((lo / step) - 0.0001) toInt
+        k1 = Math floor((hi / step) + 0.0001) toInt
+        values = []
+        k = k0
+        { k <= k1 } whileTrue {
+            values append(k * step)
+            k = k + 1
+        }
+        // 2.5 x 10^e needs one decimal more than 10^e does (25 none, 2.5 one)
+        decimals = (mult == 2.5) ifTrue { Math max(0, 1 - e) } ifFalse { Math max(0, 0 - e) }
+        #{values: values, step: step, decimals: decimals}
+    }
+
+    // Labels for tick values. Very large or very small magnitudes get an
+    // exponent suffix ("2.5e6").
+    labels(values, decimals) {
+        (values size == 0) ifTrue { return [] }
+        biggest = values reduce(0) { |m, v| Math max(m, v abs) }
+        big = exponent(biggest)
+        (biggest > 0 && (big >= 6 || big <= -5)) ifTrue {
+            scale = pow10(big)
+            step = (values size > 1) ifTrue { (values at(1) - values at(0)) abs } ifFalse { biggest }
+            d = _decimalsFor(step / scale)
+            return values map { |v|
+                (v == 0) ifTrue { "0" } ifFalse { format(v / scale, d) + "e" + big toString }
+            }
+        }
+        values map { |v| format(v, decimals) }
+    }
+
+    // Decimals needed to show multiples of step exactly (0.25: 2, 5: 0)
+    _decimalsFor(step) {
+        e = exponent(step)
+        m = step / pow10(e)
+        ((m - 2.5) abs < 0.01) ifTrue { Math max(0, 1 - e) } ifFalse { Math max(0, 0 - e) }
+    }
+
+    // v rounded to d decimals, as text; negative numbers use a real minus sign
+    format(v, d = 0) {
+        (v == nil) ifTrue { return "" }
+        (v != v) ifTrue { return "nan" }
+        (d <= 0) ifTrue {
+            n = Math round(v)
+            (n == 0) ifTrue { return "0" }
+            return (n < 0) ifTrue { minus + n abs toString } ifFalse { n toString }
+        }
+        scale = Math round(pow10(d))
+        n = Math round(v * scale)
+        neg = n < 0
+        n = n abs
+        frac = (n % scale) toString padLeft(d, "0")
+        text = (n / scale) toString + "." + frac
+        (neg && n != 0) ifTrue { minus + text } ifFalse { text }
+    }
+
+    // A short label for any number: up to 4 significant decimals, trailing
+    // zeros dropped (used for annotations such as heatmap cells)
+    short(v, digits = 4) {
+        (v == nil) ifTrue { return "" }
+        (v == Math round(v)) ifTrue { return format(v, 0) }
+        e = exponent(v)
+        d = Math max(0, (digits - 1) - e)
+        text = format(v, Math min(d, 6))
+        (text contains(".")) ifTrue {
+            { text endsWith("0") } whileTrue { text = text slice(0, text length - 1) }
+            (text endsWith(".")) ifTrue { text = text slice(0, text length - 1) }
+        }
+        text
+    }
+}

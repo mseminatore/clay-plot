@@ -1,0 +1,77 @@
+// ML-style figures with the plain plotting API (run from the brick folder:
+// clay examples/ml.clay). Writes examples/out/*.svg.
+import("plot")
+
+out = "examples/out"
+(File isDir(out)) ifFalse { File mkdir(out) }
+
+seed = 11
+rand = { seed = (seed * 48271) % 2147483647; seed / 2147483647.0 }
+
+// net history rows look like [loss, learningRate, validationLoss]
+history = (1..30) map { |e|
+    v = (e < 10) ifTrue { -1 } ifFalse { (1.7 / e) + 0.15 }
+    [(1.5 / e) + 0.1, 0.01, v]
+}
+loss = history map { |r| r at(0) }
+val = history map { |r| (r at(2) < 0) ifTrue { nil } ifFalse { r at(2) } }
+Plot plot(loss, #{label: "train"})
+Plot plot(val, #{label: "validation"})
+Plot xlabel("epoch"); Plot ylabel("loss"); Plot legend; Plot title("history with gaps")
+Plot savefig(out + "/history.svg")
+Plot close
+
+// a confusion matrix, annotated
+cm = [[50, 2, 1], [3, 41, 6], [0, 4, 47]]
+names = ["cat", "dog", "bird"]
+Plot figure(#{figsize: [5, 4.5]})
+Plot imshow(cm, #{cmap: "Blues"})
+Plot colorbar
+3 times { |r| 3 times { |c|
+    v = cm at(r) at(c)
+    Plot text(c, r, v toString, #{ha: "center", va: "center", color: (v > 25) ifTrue { "white" } ifFalse { "black" }})
+} }
+Plot xticks([0, 1, 2], names); Plot yticks([0, 1, 2], names)
+Plot xlabel("predicted"); Plot ylabel("actual"); Plot title("Confusion matrix")
+Plot savefig(out + "/confusion.svg")
+Plot close
+
+// a grid of 28 x 28 "digits", axes off
+[fig, axs] = Plot subplots(2, 5, #{figsize: [8, 3.6]})
+10 times { |i|
+    ax = axs at(i / 5) at(i % 5)
+    pixels = (0..783) map { |p|
+        r = p / 28
+        c = p % 28
+        d = (((r - 14) * (r - 14)) + ((c - 14) * (c - 14))) toFloat
+        ((d < (40 + (i * 8))) && (d > (i * 6))) ifTrue { 0.6 + (rand value * 0.4) } ifFalse { rand value * 0.1 }
+    }
+    ax imshow(pixels, #{cmap: "gray"})
+    ax title("pred " + i toString, #{fontsize: 9})
+    ax axis("off")
+}
+fig suptitle("Samples")
+fig savefig(out + "/digits.svg")
+
+// ROC
+Plot figure(#{figsize: [5, 5]})
+fpr = [0, 0.05, 0.1, 0.2, 0.35, 0.5, 0.7, 1]
+tpr = [0, 0.4, 0.62, 0.8, 0.9, 0.95, 0.98, 1]
+Plot plot(fpr, tpr, #{label: "model (AUC 0.88)"})
+Plot fillBetween(fpr, tpr, #{alpha: 0.15, color: "C0"})
+Plot plot([0, 1], [0, 1], "k--", #{label: "chance", lw: 1})
+Plot xlim(0, 1); Plot ylim(0, 1)
+Plot xlabel("false positive rate"); Plot ylabel("true positive rate"); Plot title("ROC")
+Plot legend(#{loc: "lower right"})
+Plot savefig(out + "/roc.svg")
+Plot close
+
+// horizontal bars, rotated tick labels, text in axes coordinates
+Plot figure(#{figsize: [6, 3.5]})
+Plot barh(["conv1", "conv2", "dense1", "dense2", "output"], [0.12, 0.31, 0.92, 0.44, 0.05], #{color: ["C0", "C0", "C3", "C0", "C0"]})
+Plot text(0.98, 0.04, "weights' mean |w|", #{transform: "axes", ha: "right", color: "gray"})
+Plot grid(#{axis: "x"})
+Plot title("Per-layer magnitude", #{loc: "left"})
+Plot savefig(out + "/layers.svg")
+Plot close
+("wrote " + out) println

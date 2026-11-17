@@ -1,0 +1,55 @@
+// Draws a few example figures into examples/out/ (run from the brick folder:
+// clay examples/gallery.clay)
+import("plot")
+
+out = "examples/out"
+(File isDir(out)) ifFalse { File mkdir(out) }
+
+// 1. a learning curve
+epochs = (1..40) toArray
+train = epochs map { |e| (2.0 / (e + 1)) + 0.05 }
+valid = epochs map { |e| (2.2 / (e + 1)) + 0.08 + (e * 0.0015) }
+Plot plot(epochs, train, #{label: "train"})
+Plot plot(epochs, valid, "--", #{label: "validation"})
+Plot axvline(23, #{color: "gray", linestyle: ":", label: "best epoch"})
+Plot title("Learning curve")
+Plot xlabel("epoch")
+Plot ylabel("loss")
+Plot grid
+Plot legend
+Plot savefig(out + "/learning_curve.svg")
+Plot close
+
+// 2. markers, scatter with a colormap, and a colorbar
+xs = (0..60) map { |i| i / 10.0 }
+Plot plot(xs, xs map { |x| Math sin(x) }, "o-", #{label: "sin", markersize: 4})
+Plot plot(xs, xs map { |x| Math cos(x) }, "s:", #{label: "cos", markersize: 3})
+Plot legend
+Plot title("Format strings")
+Plot savefig(out + "/trig.svg")
+Plot close
+
+// 3. subplots: bar, hist, scatter, imshow
+[fig, axs] = Plot subplots(2, 2, #{figsize: [9, 7]})
+axs at(0) at(0) bar(["cat", "dog", "bird", "fish"], [12, 30, 7, 18], #{color: "C1"})
+axs at(0) at(0) title("Bar")
+seed = 7
+rand = { seed = (seed * 48271) % 2147483647; seed / 2147483647.0 }
+normal = { ((1..12) map { |i| rand value }) sum - 6 }
+samples = (1..2000) map { |i| normal value }
+axs at(0) at(1) hist(samples, 30, #{alpha: 0.8, label: "N(0, 1)"})
+axs at(0) at(1) title("Histogram")
+axs at(0) at(1) legend
+px = (1..200) map { |i| normal value }
+py = px map { |x| (x * 0.8) + (normal value * 0.5) }
+sc = axs at(1) at(0) scatter(px, py, #{c: py, cmap: "plasma", s: 20, alpha: 0.8})
+axs at(1) at(0) colorbar(sc, #{label: "y"})
+axs at(1) at(0) title("Scatter")
+img = (0..27) map { |r| (0..27) map { |c| Math sin(r / 4.0) * Math cos(c / 5.0) } }
+axs at(1) at(1) imshow(img, #{cmap: "coolwarm"})
+axs at(1) at(1) colorbar
+axs at(1) at(1) title("imshow")
+fig suptitle("Subplots")
+fig savefig(out + "/subplots.svg")
+
+("wrote " + out) println

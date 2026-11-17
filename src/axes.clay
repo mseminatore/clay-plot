@@ -1,0 +1,1235 @@
+// PlotAxes -- one plot area: its artists, scales, ticks, labels and legend
+//
+// Made by a figure (fig subplots, fig addSubplot, Plot gca); every drawing
+// method returns the artist it added, a Dict you can change before saving
+// (line set("color", "red")).
+
+PlotAxes = Object clone {
+    figure = nil
+    artists = nil
+    cell = nil              // [rows, cols, row, col] in the figure's grid
+    titleText = nil
+    titleOpts = nil
+    xlabelText = nil
+    ylabelText = nil
+    xlimits = nil           // [lo, hi]; nil at either end means automatic
+    ylimits = nil
+    xtickSpec = nil         // #{values:, labels:, rotation:}
+    ytickSpec = nil
+    gridOn = false
+    gridOpts = nil
+    legendOpts = nil        // nil: no legend
+    nextColor = 0
+    aspect = nil            // nil or "equal"
+    yInverted = false
+    axisVisible = true
+    integerX = false
+    integerY = false
+    colorbarArtist = nil
+    colorbarLabel = nil
+    // worked out while drawing
+    plotBox = nil           // [x, y, w, h] in pixels
+    view = nil              // [x0, x1, y0, y1] in data units
+    xt = nil                // ticks: #{values:, labels:, rotation:}
+    yt = nil
+    cbt = nil
+    sx = 1.0
+    ox = 0.0
+    sy = 1.0
+    oy = 0.0
+
+    init(fig, where = nil) {
+        self figure = fig
+        self artists = []
+        self cell = where ?? [1, 1, 0, 0]
+        self gridOn = Plot rc get("axes.grid") ?? false
+    }
+
+    // ---- drawing --------------------------------------------------------
+
+    // plot(ys), plot(xs, ys), plot(xs, ys, "r--"), each with an optional
+    // options Dict last: color, label, linewidth (lw), linestyle (ls), marker,
+    // markersize (ms), alpha. Rows of numbers plot one line per column.
+    plot(a = nil, b = nil, c = nil, d = nil) {
+        [items, fmt, opts] = _split([a, b, c, d])
+        (items size == 0) ifTrue { raise("Plot: plot needs y values: plot(ys) or plot(xs, ys)") }
+        (items size > 2) ifTrue { raise("Plot: plot takes xs and ys (then a format string and an options Dict)") }
+        ys = _seq(items last)
+        xs = (items size == 2) ifTrue { _seq(items first) } ifFalse { nil }
+        ((ys size > 0) && (ys first type == "Array")) ifTrue {
+            labels = opts get("label")
+            out = []
+            ys first size times { |j|
+                o = _copy(opts)
+                (labels type == "Array") ifTrue { o set("label", labels at(j)) }
+                out append(_line(xs, ys map { |row| row at(j) }, fmt, o))
+            }
+            return out
+        }
+        _line(xs, ys, fmt, opts)
+    }
+
+    // scatter(xs, ys, #{s:, c:, cmap:, vmin:, vmax:, marker:, alpha:, label:,
+    // edgecolors:}). s is a marker area in points squared (one number, or one
+    // per point); c is a colour, a colour per point, or a number per point
+    // mapped through cmap.
+    scatter(x, y, opts = nil) {
+        opts = opts ?? #{}
+        xs = _seq(x)
+        ys = _seq(y)
+        (xs size != ys size) ifTrue { raise("Plot: scatter: x and y must be the same length (" + xs size toString + " and " + ys size toString + ")") }
+        c = opts get("c") ?? opts get("color")
+        art = #{kind: "scatter", xs: xs, ys: ys, marker: opts get("marker") ?? "o",
+                sizes: opts get("s") ?? Math pow(_rc("lines.markersize"), 2),
+                alpha: opts get("alpha"), label: opts get("label"),
+                edgecolor: _hexOrNil(opts get("edgecolors") ?? opts get("edgecolor")),
+                cmap: opts get("cmap") ?? _rc("image.cmap")}
+        ((c type == "Array") && (c size == xs size) && (c size > 0) && (c first type == "Number")) ifTrue {
+            art set("values", c)
+            _setRange(art, c, opts)
+        } ifFalse {
+            ((c type == "Array") && (c size == xs size) && (c size > 0) && (c first type == "String")) ifTrue {
+                art set("colors", c map { |s| PlotColor hex(s) })
+                art set("color", art get("colors") first)
+            } ifFalse {
+                art set("color", PlotColor hex(c ?? _nextCycle))
+            }
+        }
+        artists append(art)
+        art
+    }
+
+    // bar(xs, heights, #{width:, bottom:, align:, color:, edgecolor:,
+    // linewidth:, label:, alpha:}). xs may be strings: the bars go at 0, 1,
+    // 2 ... and the strings label them.
+    bar(x, height, opts = nil) { _bars("v", x, height, opts ?? #{}) }
+
+    // Horizontal bars: barh(ys, widths, #{height:, left:, ...})
+    barh(y, width, opts = nil) { _bars("h", y, width, opts ?? #{}) }
+
+    // A histogram: hist(values, bins, opts) or hist(values, #{bins:, range:,
+    // density:, histtype: "bar" or "step", color:, alpha:, label:}). bins is a
+    // count or an Array of edges. Returns [counts, edges, artist], as
+    // matplotlib's (n, bins, patches).
+    hist(data, bins = nil, opts = nil) {
+        (bins type == "Dict") ifTrue { opts = bins; bins = nil }
+        opts = opts ?? #{}
+        bins = bins ?? opts get("bins") ?? 10
+        values = _seq(data) filter { |v| (v != nil) && (v == v) }
+        edges = nil
+        (bins type == "Array") ifTrue { edges = bins } ifFalse {
+            rng = opts get("range")
+            lo = (rng != nil) ifTrue { rng at(0) } ifFalse { (values size > 0) ifTrue { values min } ifFalse { 0 } }
+            hi = (rng != nil) ifTrue { rng at(1) } ifFalse { (values size > 0) ifTrue { values max } ifFalse { 1 } }
+            (hi == lo) ifTrue { lo = lo - 0.5; hi = hi + 0.5 }
+            lo = lo toFloat
+            span = hi - lo
+            edges = (0..bins) map { |i| lo + ((span * i) / bins) }
+        }
+        n = edges size - 1
+        (n < 1) ifTrue { raise("Plot: hist needs at least one bin") }
+        counts = (1..n) map { |i| 0 }
+        first = edges first
+        last = edges last
+        values each { |v|
+            ((v >= first) && (v <= last)) ifTrue {
+                i = _bin(edges, v)
+                counts setAt(i, counts at(i) + 1)
+            }
+        }
+        (opts get("density") == true) ifTrue {
+            total = counts sum
+            (total > 0) ifTrue {
+                counts = (0..(n - 1)) map { |i| counts at(i) / (total * (edges at(i + 1) - edges at(i))) toFloat }
+            }
+        }
+        color = PlotColor hex(opts get("color") ?? _nextCycle)
+        art = nil
+        (opts get("histtype") == "step") ifTrue {
+            sx2 = [edges first]
+            sy2 = [0]
+            n times { |i|
+                sx2 append(edges at(i)); sy2 append(counts at(i))
+                sx2 append(edges at(i + 1)); sy2 append(counts at(i))
+            }
+            sx2 append(edges last); sy2 append(0)
+            art = #{kind: "line", xs: sx2, ys: sy2, color: color, linewidth: opts get("linewidth") ?? _rc("lines.linewidth"),
+                    linestyle: "-", label: opts get("label"), alpha: opts get("alpha"), stickyY: [0]}
+        } ifFalse {
+            art = #{kind: "bars", orient: "v", pos: edges slice(0, n), lengths: counts,
+                    width: (0..(n - 1)) map { |i| edges at(i + 1) - edges at(i) },
+                    bottom: 0, align: "edge", color: color, label: opts get("label"),
+                    alpha: opts get("alpha"), edgecolor: _hexOrNil(opts get("edgecolor")),
+                    linewidth: opts get("linewidth")}
+        }
+        artists append(art)
+        [counts, edges, art]
+    }
+
+    // Shade between two curves: fillBetween(xs, y1, y2 = 0, #{color:, alpha:,
+    // label:}). y2 may be a number or an Array.
+    fillBetween(x, y1, y2 = nil, opts = nil) {
+        (y2 type == "Dict") ifTrue { opts = y2; y2 = nil }
+        opts = opts ?? #{}
+        xs = _seq(x)
+        a = _seq(y1)
+        b = (y2 == nil) ifTrue { 0 } ifFalse { y2 }
+        bs = (b type == "Number") ifTrue { xs map { |v| b } } ifFalse { _seq(b) }
+        ((a size != xs size) || (bs size != xs size)) ifTrue { raise("Plot: fillBetween: xs, y1 and y2 must be the same length") }
+        art = #{kind: "fill", xs: xs, y1: a, y2: bs, color: PlotColor hex(opts get("color") ?? _nextCycle),
+                alpha: opts get("alpha"), label: opts get("label"), edgecolor: _hexOrNil(opts get("edgecolor"))}
+        artists append(art)
+        art
+    }
+
+    // A horizontal line across the axes at y: axhline(y, #{color:, linestyle:,
+    // linewidth:, label:, alpha:})
+    axhline(y = 0, opts = nil) { _refLine("hline", y, opts ?? #{}) }
+
+    // A vertical line across the axes at x
+    axvline(x = 0, opts = nil) { _refLine("vline", x, opts ?? #{}) }
+
+    // Text at data coordinates: text(x, y, "label", #{fontsize:, color:, ha:,
+    // va:, rotation:, transform: "axes"}). With transform "axes", x and y are
+    // fractions of the axes (0, 0 bottom left; 1, 1 top right).
+    text(x, y, s, opts = nil) {
+        opts = opts ?? #{}
+        art = #{kind: "text", x: x, y: y, text: s toString, fontsize: opts get("fontsize") ?? _rc("font.size"),
+                color: PlotColor hex(opts get("color") ?? "k"), ha: opts get("ha") ?? "left",
+                va: opts get("va") ?? "baseline", rotation: opts get("rotation") ?? 0,
+                transform: opts get("transform") ?? "data", weight: opts get("fontweight")}
+        artists append(art)
+        art
+    }
+
+    // Show a 2-D array as an image: rows of numbers (mapped through cmap) or
+    // rows of [r, g, b] pixels (0..1, or 0..255 when any value is over 1). A
+    // flat Array needs #{shape: [rows, cols]}, unless it is square (784
+    // numbers show as 28 x 28). An Image from the image brick works too.
+    // Options: cmap, vmin, vmax, aspect ("equal" or "auto"), origin ("upper"
+    // or "lower"), extent [left, right, bottom, top].
+    imshow(data, opts = nil) {
+        opts = opts ?? #{}
+        rows = _grid(data, opts get("shape"))
+        nr = rows size
+        nc = rows first size
+        rgb = rows first first type == "Array"
+        lower = opts get("origin") == "lower"
+        ext = opts get("extent")
+        (ext == nil) ifTrue {
+            ext = lower ifTrue { [-0.5, nc - 0.5, -0.5, nr - 0.5] } ifFalse { [-0.5, nc - 0.5, nr - 0.5, -0.5] }
+        }
+        art = #{kind: "image", rows: rows, nrows: nr, ncols: nc, rgb: rgb, extent: ext,
+                cmap: opts get("cmap") ?? _rc("image.cmap"), alpha: opts get("alpha"), label: nil}
+        rgb ifFalse { _setRange(art, rows flatten, opts) }
+        artists append(art)
+        ((opts get("aspect") ?? "equal") == "equal") ifTrue { self aspect = "equal" }
+        self yInverted = lower not
+        (opts get("extent") == nil) ifTrue { self integerX = true; self integerY = true }
+        art
+    }
+
+    // A colour bar for an image or a colour-mapped scatter (the last one,
+    // unless you pass it): colorbar(artist, #{label:})
+    colorbar(art = nil, opts = nil) {
+        (art type == "Dict" && art get("kind") == nil) ifTrue { opts = art; art = nil }
+        target = art ?? (artists reverse find { |x| (x get("kind") == "image" && x get("rgb") not) || (x get("values") != nil) })
+        (target == nil) ifTrue { raise("Plot: colorbar needs an image or a scatter with numeric colours (c:) first") }
+        self colorbarArtist = target
+        self colorbarLabel = (opts == nil) ifTrue { nil } ifFalse { opts get("label") }
+        target
+    }
+
+    // ---- labels and settings --------------------------------------------
+
+    title(s, opts = nil) { self titleText = s; self titleOpts = opts ?? #{}; self }
+    xlabel(s) { self xlabelText = s; self }
+    ylabel(s) { self ylabelText = s; self }
+
+    // xlim(lo, hi) or xlim([lo, hi]) sets the x range (nil keeps that end
+    // automatic); xlim() returns the range in use, [lo, hi]
+    xlim(lo = nil, hi = nil) {
+        ((lo == nil) && (hi == nil)) ifTrue { v = _view; return [v at(0), v at(1)] }
+        (lo type == "Array") ifTrue { hi = lo at(1); lo = lo at(0) }
+        self xlimits = [lo, hi]
+        self
+    }
+
+    ylim(lo = nil, hi = nil) {
+        ((lo == nil) && (hi == nil)) ifTrue { v = _view; return [v at(2), v at(3)] }
+        (lo type == "Array") ifTrue { hi = lo at(1); lo = lo at(0) }
+        self ylimits = [lo, hi]
+        self
+    }
+
+    // xticks(values), xticks(values, labels), xticks(values, labels,
+    // #{rotation: 45}); xticks([]) hides them
+    xticks(values = nil, labels = nil, opts = nil) { self xtickSpec = _tickSpec(values, labels, opts); self }
+    yticks(values = nil, labels = nil, opts = nil) { self ytickSpec = _tickSpec(values, labels, opts); self }
+
+    // grid(), grid(false), grid(true, #{axis: "y", color:, linestyle:, alpha:})
+    grid(on = true, opts = nil) {
+        (on type == "Dict") ifTrue { opts = on; on = true }
+        self gridOn = on
+        self gridOpts = opts ?? #{}
+        self
+    }
+
+    // legend(), legend(["a", "b"]) to name the artists in order, or
+    // legend(#{loc: "upper left", fontsize:, title:}). loc: "best" (default),
+    // "upper right", "upper left", "lower left", "lower right", "right",
+    // "center left", "center right", "lower center", "upper center", "center"
+    legend(a = nil, b = nil) {
+        opts = #{}
+        (a type == "Dict") ifTrue { opts = a }
+        (b type == "Dict") ifTrue { opts = b }
+        (a type == "Array") ifTrue {
+            named = artists filter { |x| x get("kind") != "text" && x get("kind") != "image" }
+            (a size) times { |i| (i < named size) ifTrue { named at(i) set("label", a at(i)) } }
+        }
+        self legendOpts = opts
+        self
+    }
+
+    // axis("off"), axis("on"), axis("equal"), axis("tight"), or
+    // axis([x0, x1, y0, y1])
+    axis(mode) {
+        (mode type == "Array") ifTrue { xlim(mode at(0), mode at(1)); ylim(mode at(2), mode at(3)); return self }
+        (mode == "off") ifTrue { self axisVisible = false; return self }
+        (mode == "on") ifTrue { self axisVisible = true; return self }
+        (mode == "equal" || mode == "image" || mode == "scaled") ifTrue { self aspect = "equal"; return self }
+        (mode == "auto") ifTrue { self aspect = nil; return self }
+        (mode == "tight") ifTrue { v = _view; xlim(v at(0), v at(1)); ylim(v at(2), v at(3)); return self }
+        raise("Plot: axis takes \"off\", \"on\", \"equal\", \"auto\", \"tight\" or [x0, x1, y0, y1]")
+    }
+
+    invertYaxis() { self yInverted = yInverted not; self }
+
+    // Several settings at once, as matplotlib's ax.set: set(#{title:, xlabel:,
+    // ylabel:, xlim:, ylim:, xticks:, yticks:})
+    set(opts) {
+        opts each { |k, v|
+            (k == "title") ifTrue { title(v) }
+            (k == "xlabel") ifTrue { xlabel(v) }
+            (k == "ylabel") ifTrue { ylabel(v) }
+            (k == "xlim") ifTrue { xlim(v) }
+            (k == "ylim") ifTrue { ylim(v) }
+            (k == "xticks") ifTrue { xticks(v) }
+            (k == "yticks") ifTrue { yticks(v) }
+            (k == "aspect") ifTrue { self aspect = (v == "equal") ifTrue { "equal" } ifFalse { nil } }
+        }
+        self
+    }
+
+    // ---- layout (used by the figure) ------------------------------------
+
+    // Space needed around the plot box: [left, top, right, bottom] in pixels,
+    // given ticks worked out for an axis length of about w x h
+    _margins(cv, w, h) {
+        self view = _view
+        _computeTicks(cv, w, h)
+        tl = _pt(3.5)
+        pad = _pt(3.5)
+        fs = _pt(_rc("xtick.labelsize"))
+        left = 0
+        top = 0
+        right = 0
+        bottom = 0
+        axisVisible ifTrue {
+            ywid = yt get("labels") reduce(0) { |m, s| Math max(m, cv measure(s, fs)) }
+            left = tl + pad + ywid
+            (ylabelText != nil) ifTrue { left = left + (_pt(_rc("axes.labelsize")) * 1.2) + _pt(4) }
+            bottom = tl + pad + _xLabelHeight(cv, fs)
+            (xlabelText != nil) ifTrue { bottom = bottom + (_pt(_rc("axes.labelsize")) * 1.25) + _pt(4) }
+            labs = xt get("labels")
+            ((labs size > 0) && (xt get("rotation") == 0)) ifTrue { right = cv measure(labs last, fs) / 2 }
+            (yt get("labels") size > 0) ifTrue { top = fs / 2 }
+        }
+        (titleText != nil) ifTrue { top = (_titleSize * 1.25) + _pt(6) }
+        (colorbarArtist != nil) ifTrue { right = _colorbarWidth(cv, h) }
+        [left, top, right, bottom]
+    }
+
+    // Place the plot box (the figure has worked out the margins)
+    _place(cv, box) {
+        x = box at(0)
+        y = box at(1)
+        w = Math max(box at(2), 10)
+        h = Math max(box at(3), 10)
+        v = view
+        (aspect == "equal") ifTrue {
+            dx = (v at(1) - v at(0)) abs
+            dy = (v at(3) - v at(2)) abs
+            ((dx > 0) && (dy > 0)) ifTrue {
+                (w / dx > h / dy) ifTrue {
+                    nw = (h * dx) / dy
+                    x = x + ((w - nw) / 2)
+                    w = nw
+                } ifFalse {
+                    nh = (w * dy) / dx
+                    y = y + ((h - nh) / 2)
+                    h = nh
+                }
+            }
+        }
+        self plotBox = [x, y, w, h]
+        self sx = w / (v at(1) - v at(0))
+        self ox = x - (v at(0) * sx)
+        yInverted ifTrue {
+            self sy = h / (v at(3) - v at(2))
+            self oy = y - (v at(2) * sy)
+        } ifFalse {
+            self sy = 0 - (h / (v at(3) - v at(2)))
+            self oy = (y + h) - (v at(2) * sy)
+        }
+        _computeTicks(cv, w, h)
+    }
+
+    _px(x) { ox + (x * sx) }
+    _py(y) { oy + (y * sy) }
+
+    // ---- rendering ------------------------------------------------------
+
+    draw(cv) {
+        b = plotBox
+        bx = b at(0)
+        by = b at(1)
+        bw = b at(2)
+        bh = b at(3)
+        axisVisible ifTrue {
+            fc = _rc("axes.facecolor")
+            (fc != nil && fc != "white" && fc != "#ffffff") ifTrue { cv rect(bx, by, bw, bh, #{fill: PlotColor hex(fc)}) }
+        }
+        (gridOn && axisVisible) ifTrue { _drawGrid(cv) }
+        cv clip(bx, by, bw, bh)
+        [0, 1, 2] each { |z|
+            artists each { |art| (_zorder(art) == z) ifTrue { _drawArtist(cv, art) } }
+        }
+        cv unclip
+        artists each { |art| (art get("kind") == "text") ifTrue { _drawText(cv, art) } }
+        axisVisible ifTrue { _drawAxis(cv) }
+        (titleText != nil) ifTrue {
+            loc = titleOpts get("loc") ?? "center"
+            tx = (loc == "left") ifTrue { bx } ifFalse { (loc == "right") ifTrue { bx + bw } ifFalse { bx + (bw / 2) } }
+            anchor = (loc == "left") ifTrue { "start" } ifFalse { (loc == "right") ifTrue { "end" } ifFalse { "middle" } }
+            cv text(tx, by - _pt(6), titleText, #{size: _titleSize, anchor: anchor, valign: "bottom"})
+        }
+        (legendOpts != nil) ifTrue { _drawLegend(cv) }
+        (colorbarArtist != nil) ifTrue { _drawColorbar(cv) }
+    }
+
+    _drawArtist(cv, art) {
+        k = art get("kind")
+        (k == "line") ifTrue { return _drawLine(cv, art) }
+        (k == "scatter") ifTrue { return _drawScatter(cv, art) }
+        (k == "bars") ifTrue { return _drawBars(cv, art) }
+        (k == "fill") ifTrue { return _drawFill(cv, art) }
+        (k == "hline" || k == "vline") ifTrue { return _drawRefLine(cv, art) }
+        (k == "image") ifTrue { return _drawImage(cv, art) }
+        nil
+    }
+
+    _zorder(art) {
+        k = art get("kind")
+        (k == "image") ifTrue { return 0 }
+        (k == "bars" || k == "fill") ifTrue { return 1 }
+        (k == "text") ifTrue { return 3 }
+        2
+    }
+
+    _drawLine(cv, art) {
+        xs = art get("xs")
+        ys = art get("ys")
+        color = PlotColor hex(art get("color"))
+        lw = _pt(art get("linewidth"))
+        ls = art get("linestyle")
+        alpha = art get("alpha")
+        ((ls != "none") && (ls != "") && (ls != " ")) ifTrue {
+            style = #{stroke: color, width: lw, dash: _dash(ls, lw), alpha: alpha, join: "round", cap: "butt"}
+            px = []
+            py = []
+            xs size times { |i|
+                x = xs at(i)
+                y = ys at(i)
+                (_ok(x) && _ok(y)) ifTrue {
+                    px append(_px(x)); py append(_py(y))
+                } ifFalse {
+                    cv polyline(px, py, style)
+                    px = []
+                    py = []
+                }
+            }
+            cv polyline(px, py, style)
+        }
+        marker = art get("marker")
+        ((marker != nil) && (marker != "none") && (marker != "")) ifTrue {
+            ms = _pt(art get("markersize") ?? _rc("lines.markersize"))
+            face = _hexOrNil(art get("markerfacecolor")) ?? color
+            edge = _hexOrNil(art get("markeredgecolor")) ?? face
+            xs size times { |i|
+                x = xs at(i)
+                y = ys at(i)
+                (_ok(x) && _ok(y)) ifTrue { _marker(cv, marker, _px(x), _py(y), ms, face, edge, alpha) }
+            }
+        }
+    }
+
+    _drawScatter(cv, art) {
+        xs = art get("xs")
+        ys = art get("ys")
+        sizes = art get("sizes")
+        values = art get("values")
+        colors = art get("colors")
+        lut = (values != nil) ifTrue { PlotColor lut(art get("cmap")) } ifFalse { nil }
+        lo = art get("vmin")
+        hi = art get("vmax")
+        span = ((hi ?? 1) - (lo ?? 0)) toFloat
+        (span == 0) ifTrue { span = 1.0 }
+        one = art get("color")
+        edge = art get("edgecolor")
+        marker = art get("marker")
+        alpha = art get("alpha")
+        xs size times { |i|
+            x = xs at(i)
+            y = ys at(i)
+            (_ok(x) && _ok(y)) ifTrue {
+                s = (sizes type == "Array") ifTrue { sizes at(i) } ifFalse { sizes }
+                color = one
+                (values != nil) ifTrue {
+                    v = values at(i)
+                    color = _ok(v) ifTrue { lut at(Math round((((v - lo) / span) clamp(0, 1)) * 255)) } ifFalse { nil }
+                }
+                (colors != nil) ifTrue { color = colors at(i) }
+                (color != nil) ifTrue { _marker(cv, marker, _px(x), _py(y), _pt(Math sqrt(s)), color, edge ?? color, alpha) }
+            }
+        }
+    }
+
+    _drawBars(cv, art) {
+        pos = art get("pos")
+        lens = art get("lengths")
+        horiz = art get("orient") == "h"
+        edge = art get("edgecolor")
+        lw = (edge != nil) ifTrue { _pt(art get("linewidth") ?? 1) } ifFalse { nil }
+        colors = art get("colors")
+        pos size times { |i|
+            span = _barSpan(art, i)
+            base = _nth(art get("bottom"), i) ?? 0
+            len = lens at(i)
+            _ok(len) ifTrue {
+                fill = (colors != nil) ifTrue { colors at(i % colors size) } ifFalse { art get("color") }
+                style = #{fill: fill, stroke: edge, width: lw, alpha: art get("alpha")}
+                horiz ifTrue {
+                    x0 = _px(base)
+                    x1 = _px(base + len)
+                    y0 = _py(span at(0))
+                    y1 = _py(span at(1))
+                    cv rect(Math min(x0, x1), Math min(y0, y1), (x1 - x0) abs, (y1 - y0) abs, style)
+                } ifFalse {
+                    x0 = _px(span at(0))
+                    x1 = _px(span at(1))
+                    y0 = _py(base)
+                    y1 = _py(base + len)
+                    cv rect(Math min(x0, x1), Math min(y0, y1), (x1 - x0) abs, (y1 - y0) abs, style)
+                }
+            }
+        }
+    }
+
+    _drawFill(cv, art) {
+        xs = art get("xs")
+        a = art get("y1")
+        b = art get("y2")
+        px = []
+        py = []
+        xs size times { |i| px append(_px(xs at(i))); py append(_py(a at(i))) }
+        (xs size) times { |j|
+            i = (xs size - 1) - j
+            px append(_px(xs at(i))); py append(_py(b at(i)))
+        }
+        edge = art get("edgecolor")
+        cv polygon(px, py, #{fill: art get("color"), alpha: art get("alpha"), stroke: edge, width: (edge != nil) ifTrue { _pt(1) } ifFalse { nil }})
+    }
+
+    _drawRefLine(cv, art) {
+        b = plotBox
+        lw = _pt(art get("linewidth"))
+        style = #{stroke: art get("color"), width: lw, dash: _dash(art get("linestyle"), lw), alpha: art get("alpha")}
+        (art get("kind") == "hline") ifTrue {
+            y = _py(art get("value"))
+            cv line(b at(0), y, b at(0) + b at(2), y, style)
+        } ifFalse {
+            x = _px(art get("value"))
+            cv line(x, b at(1), x, b at(1) + b at(3), style)
+        }
+    }
+
+    _drawImage(cv, art) {
+        ext = art get("extent")
+        xa = _px(ext at(0))
+        xb = _px(ext at(1))
+        ya = _py(ext at(2))
+        yb = _py(ext at(3))
+        rows = art get("rows")
+        // rows run from the top edge (extent's top) to the bottom
+        (yb > ya) ifTrue { rows = rows reverse }
+        cells = nil
+        art get("rgb") ifTrue {
+            peak = rows reduce(0) { |m, row| row reduce(m) { |m2, p| Math max(m2, Math max(p at(0), Math max(p at(1), p at(2)))) } }
+            scale = (peak > 1) ifTrue { 1.0 } ifFalse { 255.0 }
+            cells = rows map { |row| row map { |p| PlotColor toHex([Math round(p at(0) * scale), Math round(p at(1) * scale), Math round(p at(2) * scale)]) } }
+        } ifFalse {
+            lut = PlotColor lut(art get("cmap"))
+            lo = art get("vmin")
+            span = (art get("vmax") - lo) toFloat
+            (span == 0) ifTrue { span = 1.0 }
+            cells = rows map { |row| row map { |v| _ok(v) ifTrue { lut at(Math round((((v - lo) / span) clamp(0, 1)) * 255)) } ifFalse { nil } } }
+        }
+        cv pixels(Math min(xa, xb), Math min(ya, yb), (xb - xa) abs, (yb - ya) abs, cells)
+    }
+
+    _drawText(cv, art) {
+        x = art get("x")
+        y = art get("y")
+        px = 0
+        py = 0
+        (art get("transform") == "axes") ifTrue {
+            b = plotBox
+            px = b at(0) + (x * b at(2))
+            py = (b at(1) + b at(3)) - (y * b at(3))
+        } ifFalse {
+            px = _px(x)
+            py = _py(y)
+        }
+        ha = art get("ha")
+        anchor = (ha == "center") ifTrue { "middle" } ifFalse { (ha == "right") ifTrue { "end" } ifFalse { "start" } }
+        va = art get("va")
+        valign = (va == "center") ifTrue { "center" } ifFalse { (va == "top") ifTrue { "top" } ifFalse { (va == "bottom") ifTrue { "bottom" } ifFalse { "baseline" } } }
+        cv text(px, py, art get("text"), #{size: _pt(art get("fontsize")), color: art get("color"), anchor: anchor,
+                                         valign: valign, rotate: art get("rotation"), weight: art get("weight")})
+    }
+
+    _drawGrid(cv) {
+        o = gridOpts ?? #{}
+        which = o get("axis") ?? "both"
+        lw = _pt(o get("linewidth") ?? _rc("grid.linewidth"))
+        style = #{stroke: PlotColor hex(o get("color") ?? _rc("grid.color")), width: lw,
+                  dash: _dash(o get("linestyle") ?? "-", lw), alpha: o get("alpha") ?? _rc("grid.alpha")}
+        b = plotBox
+        (which != "y") ifTrue {
+            xt get("values") each { |v| x = _px(v); cv line(x, b at(1), x, b at(1) + b at(3), style) }
+        }
+        (which != "x") ifTrue {
+            yt get("values") each { |v| y = _py(v); cv line(b at(0), y, b at(0) + b at(2), y, style) }
+        }
+    }
+
+    _drawAxis(cv) {
+        b = plotBox
+        bx = b at(0)
+        by = b at(1)
+        bw = b at(2)
+        bh = b at(3)
+        lw = _pt(_rc("axes.linewidth"))
+        spine = #{stroke: "#000000", width: lw, cap: "square"}
+        cv line(bx, by, bx + bw, by, spine)
+        cv line(bx, by + bh, bx + bw, by + bh, spine)
+        cv line(bx, by, bx, by + bh, spine)
+        cv line(bx + bw, by, bx + bw, by + bh, spine)
+        tl = _pt(3.5)
+        pad = _pt(3.5)
+        fs = _pt(_rc("xtick.labelsize"))
+        tick = #{stroke: "#000000", width: lw}
+        rot = xt get("rotation")
+        xv = xt get("values")
+        xl = xt get("labels")
+        xv size times { |i|
+            x = _px(xv at(i))
+            cv line(x, by + bh, x, by + bh + tl, tick)
+            (rot == 0) ifTrue {
+                cv text(x, by + bh + tl + pad, xl at(i), #{size: fs, anchor: "middle", valign: "top"})
+            } ifFalse {
+                cv text(x, by + bh + tl + pad, xl at(i), #{size: fs, anchor: "end", valign: "top", rotate: rot})
+            }
+        }
+        yv = yt get("values")
+        yl = yt get("labels")
+        yv size times { |i|
+            y = _py(yv at(i))
+            cv line(bx - tl, y, bx, y, tick)
+            cv text(bx - tl - pad, y, yl at(i), #{size: fs, anchor: "end", valign: "center"})
+        }
+        ls = _pt(_rc("axes.labelsize"))
+        (xlabelText != nil) ifTrue {
+            cv text(bx + (bw / 2), by + bh + tl + pad + _xLabelHeight(cv, fs) + _pt(4), xlabelText, #{size: ls, anchor: "middle", valign: "top"})
+        }
+        (ylabelText != nil) ifTrue {
+            ywid = yl reduce(0) { |m, s| Math max(m, cv measure(s, fs)) }
+            cv text(bx - tl - pad - ywid - _pt(4), by + (bh / 2), ylabelText, #{size: ls, anchor: "middle", valign: "bottom", rotate: 90})
+        }
+    }
+
+    _drawLegend(cv) {
+        entries = artists filter { |a| (a get("label") != nil) && (a get("label") toString startsWith("_") not) && (a get("kind") != "text") && (a get("kind") != "image") }
+        (entries size == 0) ifTrue { return nil }
+        o = legendOpts
+        fs = _pt(o get("fontsize") ?? _rc("legend.fontsize"))
+        pad = fs * 0.4
+        handle = fs * 2.0
+        gap = fs * 0.8
+        rowH = fs * 1.5
+        heading = o get("title")
+        widest = entries reduce(0) { |m, a| Math max(m, cv measure(a get("label") toString, fs)) }
+        (heading != nil) ifTrue { widest = Math max(widest, cv measure(heading, fs) - handle - gap) }
+        w = (pad * 2) + handle + gap + widest
+        h = (pad * 2) + (entries size * rowH) - (fs * 0.5)
+        (heading != nil) ifTrue { h = h + rowH }
+        b = plotBox
+        inset = fs * 0.5
+        loc = o get("loc") ?? "best"
+        (loc == "best") ifTrue { loc = _bestLoc(w, h, inset) }
+        pos = _legendPos(loc, w, h, inset)
+        lx = pos at(0)
+        ly = pos at(1)
+        cv rect(lx, ly, w, h, #{fill: "#ffffff", stroke: "#cccccc", width: _pt(0.8), alpha: o get("framealpha") ?? 0.8})
+        y = ly + pad + (fs * 0.5)
+        (heading != nil) ifTrue {
+            cv text(lx + (w / 2), y, heading, #{size: fs, anchor: "middle", valign: "center"})
+            y = y + rowH
+        }
+        entries each { |a|
+            hx = lx + pad
+            k = a get("kind")
+            color = PlotColor hex(a get("color") ?? "#000000")
+            (k == "line" || k == "hline" || k == "vline") ifTrue {
+                ls = a get("linestyle") ?? "-"
+                lw = _pt(a get("linewidth") ?? _rc("lines.linewidth"))
+                ((ls != "none") && (ls != "")) ifTrue {
+                    cv line(hx, y, hx + handle, y, #{stroke: color, width: lw, dash: _dash(ls, lw), alpha: a get("alpha")})
+                }
+                m = a get("marker")
+                ((m != nil) && (m != "none")) ifTrue {
+                    face = _hexOrNil(a get("markerfacecolor")) ?? color
+                    _marker(cv, m, hx + (handle / 2), y, _pt(a get("markersize") ?? _rc("lines.markersize")), face, _hexOrNil(a get("markeredgecolor")) ?? face, a get("alpha"))
+                }
+            }
+            (k == "scatter") ifTrue {
+                c = a get("color") ?? PlotColor lut(a get("cmap")) at(128)
+                s = a get("sizes")
+                (s type == "Array") ifTrue { s = Math pow(_rc("lines.markersize"), 2) }
+                _marker(cv, a get("marker"), hx + (handle / 2), y, _pt(Math sqrt(s)), c, a get("edgecolor") ?? c, a get("alpha"))
+            }
+            (k == "bars" || k == "fill") ifTrue {
+                fill = (a get("colors") != nil) ifTrue { a get("colors") first } ifFalse { a get("color") }
+                cv rect(hx, y - (fs * 0.35), handle, fs * 0.7, #{fill: fill, alpha: a get("alpha"), stroke: a get("edgecolor"), width: _pt(1)})
+            }
+            cv text(hx + handle + gap, y, a get("label") toString, #{size: fs, valign: "center"})
+            y = y + rowH
+        }
+    }
+
+    _legendPos(loc, w, h, inset) {
+        b = plotBox
+        left = b at(0) + inset
+        right = (b at(0) + b at(2)) - inset - w
+        cx = b at(0) + ((b at(2) - w) / 2)
+        top = b at(1) + inset
+        bottom = (b at(1) + b at(3)) - inset - h
+        cy = b at(1) + ((b at(3) - h) / 2)
+        (loc == "upper right") ifTrue { return [right, top] }
+        (loc == "upper left") ifTrue { return [left, top] }
+        (loc == "lower left") ifTrue { return [left, bottom] }
+        (loc == "lower right") ifTrue { return [right, bottom] }
+        (loc == "right" || loc == "center right") ifTrue { return [right, cy] }
+        (loc == "center left") ifTrue { return [left, cy] }
+        (loc == "lower center") ifTrue { return [cx, bottom] }
+        (loc == "upper center") ifTrue { return [cx, top] }
+        (loc == "center") ifTrue { return [cx, cy] }
+        raise("Plot: unknown legend loc: " + loc toString)
+    }
+
+    // The legend corner covering the fewest data points (matplotlib's "best")
+    _bestLoc(w, h, inset) {
+        pts = []
+        artists each { |a|
+            k = a get("kind")
+            (k == "line" || k == "scatter" || k == "fill") ifTrue {
+                xs = a get("xs")
+                ys = (k == "fill") ifTrue { a get("y1") } ifFalse { a get("ys") }
+                stride = Math max(1, xs size / 500)
+                i = 0
+                { i < xs size } whileTrue {
+                    (_ok(xs at(i)) && _ok(ys at(i))) ifTrue { pts append([_px(xs at(i)), _py(ys at(i))]) }
+                    i = i + stride
+                }
+            }
+            (k == "bars") ifTrue {
+                a get("pos") size times { |i|
+                    span = _barSpan(a, i)
+                    top = (_nth(a get("bottom"), i) ?? 0) + a get("lengths") at(i)
+                    (a get("orient") == "h") ifTrue {
+                        pts append([_px(top), _py(span at(0))]); pts append([_px(top), _py(span at(1))])
+                    } ifFalse {
+                        pts append([_px(span at(0)), _py(top)]); pts append([_px(span at(1)), _py(top)])
+                        pts append([_px((span at(0) + span at(1)) / 2), _py(top)])
+                    }
+                }
+            }
+        }
+        best = "upper right"
+        fewest = nil
+        ["upper right", "upper left", "lower left", "lower right", "right", "center left",
+         "lower center", "upper center", "center"] each { |loc|
+            p = _legendPos(loc, w, h, inset)
+            n = 0
+            pts each { |q|
+                ((q at(0) >= p at(0)) && (q at(0) <= p at(0) + w) && (q at(1) >= p at(1)) && (q at(1) <= p at(1) + h)) ifTrue { n = n + 1 }
+            }
+            ((fewest == nil) || (n < fewest)) ifTrue { fewest = n; best = loc }
+        }
+        best
+    }
+
+    _colorbarWidth(cv, h) {
+        fs = _pt(_rc("ytick.labelsize"))
+        a = colorbarArtist
+        t = PlotTicks locate(a get("vmin"), a get("vmax"), Math max(2, Math min(9, (h / (fs * 2.5)) toInt)))
+        self cbt = #{values: t get("values"), labels: PlotTicks labels(t get("values"), t get("decimals"))}
+        widest = cbt get("labels") reduce(0) { |m, s| Math max(m, cv measure(s, fs)) }
+        extra = (colorbarLabel != nil) ifTrue { (_pt(_rc("axes.labelsize")) * 1.2) + _pt(4) } ifFalse { 0 }
+        _pt(14) + _pt(10) + _pt(3.5) + _pt(3.5) + widest + extra
+    }
+
+    _drawColorbar(cv) {
+        b = plotBox
+        a = colorbarArtist
+        x = b at(0) + b at(2) + _pt(14)
+        y = b at(1)
+        w = _pt(10)
+        h = b at(3)
+        lut = PlotColor lut(a get("cmap"))
+        steps = 128
+        cells = (0..(steps - 1)) map { |i| [lut at(Math round(((steps - 1 - i) * 255.0) / (steps - 1)))] }
+        cv pixels(x, y, w, h, cells)
+        lw = _pt(_rc("axes.linewidth"))
+        cv rect(x, y, w, h, #{stroke: "#000000", width: lw})
+        lo = a get("vmin")
+        span = (a get("vmax") - lo) toFloat
+        (span == 0) ifTrue { span = 1.0 }
+        fs = _pt(_rc("ytick.labelsize"))
+        tl = _pt(3.5)
+        vals = cbt get("values")
+        labs = cbt get("labels")
+        vals size times { |i|
+            ty = (y + h) - (((vals at(i) - lo) / span) * h)
+            cv line(x + w, ty, x + w + tl, ty, #{stroke: "#000000", width: lw})
+            cv text(x + w + tl + _pt(3.5), ty, labs at(i), #{size: fs, valign: "center"})
+        }
+        (colorbarLabel != nil) ifTrue {
+            widest = labs reduce(0) { |m, s| Math max(m, cv measure(s, fs)) }
+            cv text(x + w + tl + _pt(3.5) + widest + _pt(4), y + (h / 2), colorbarLabel,
+                    #{size: _pt(_rc("axes.labelsize")), anchor: "middle", valign: "top", rotate: 90})
+        }
+    }
+
+    // Draw one marker centred at x, y (pixels), size = its width in pixels
+    _marker(cv, kind, x, y, size, face, edge, alpha) {
+        r = size / 2
+        filled = #{fill: face, stroke: edge, width: _pt(1), alpha: alpha}
+        stroked = #{stroke: edge, width: _pt(1), alpha: alpha}
+        (kind == "o") ifTrue { return cv circle(x, y, r, filled) }
+        (kind == ".") ifTrue { return cv circle(x, y, r * 0.5, filled) }
+        (kind == ",") ifTrue { return cv rect(x - 0.5, y - 0.5, 1, 1, #{fill: face, alpha: alpha}) }
+        (kind == "s") ifTrue { return cv rect(x - (r * 0.85), y - (r * 0.85), r * 1.7, r * 1.7, filled) }
+        (kind == "+") ifTrue {
+            cv line(x - r, y, x + r, y, stroked)
+            return cv line(x, y - r, x, y + r, stroked)
+        }
+        (kind == "x") ifTrue {
+            d = r * 0.75
+            cv line(x - d, y - d, x + d, y + d, stroked)
+            return cv line(x - d, y + d, x + d, y - d, stroked)
+        }
+        (kind == "|") ifTrue { return cv line(x, y - r, x, y + r, stroked) }
+        (kind == "_") ifTrue { return cv line(x - r, y, x + r, y, stroked) }
+        (kind == "D") ifTrue { return cv polygon([x, x + r, x, x - r], [y - r, y, y + r, y], filled) }
+        (kind == "d") ifTrue { return cv polygon([x, x + (r * 0.6), x, x - (r * 0.6)], [y - r, y, y + r, y], filled) }
+        (kind == "^") ifTrue { return _regular(cv, x, y, r, 3, 90, filled) }
+        (kind == "v") ifTrue { return _regular(cv, x, y, r, 3, 270, filled) }
+        (kind == "<") ifTrue { return _regular(cv, x, y, r, 3, 180, filled) }
+        (kind == ">") ifTrue { return _regular(cv, x, y, r, 3, 0, filled) }
+        (kind == "p") ifTrue { return _regular(cv, x, y, r, 5, 90, filled) }
+        (kind == "h") ifTrue { return _regular(cv, x, y, r, 6, 90, filled) }
+        (kind == "*") ifTrue {
+            px = []
+            py = []
+            10 times { |i|
+                rr = ((i % 2) == 0) ifTrue { r * 1.1 } ifFalse { r * 0.45 }
+                ang = ((90 + (i * 36)) * Math pi) / 180
+                px append(x + (rr * Math cos(ang))); py append(y - (rr * Math sin(ang)))
+            }
+            return cv polygon(px, py, filled)
+        }
+        raise("Plot: unknown marker: " + kind toString)
+    }
+
+    _regular(cv, x, y, r, n, start, style) {
+        px = []
+        py = []
+        n times { |i|
+            ang = ((start + ((i * 360) / n)) * Math pi) / 180
+            px append(x + (r * Math cos(ang))); py append(y - (r * Math sin(ang)))
+        }
+        cv polygon(px, py, style)
+    }
+
+    // ---- scales and ticks -----------------------------------------------
+
+    // The range shown: [x0, x1, y0, y1], from the data with a 5% margin
+    // (none for images), or the limits set with xlim / ylim
+    _view() {
+        lim = [nil, nil, nil, nil]
+        stickyX = []
+        stickyY = []
+        tight = [false, false]
+        incX = { |v| (_ok(v)) ifTrue {
+            ((lim at(0) == nil) || (v < lim at(0))) ifTrue { lim setAt(0, v) }
+            ((lim at(1) == nil) || (v > lim at(1))) ifTrue { lim setAt(1, v) } } }
+        incY = { |v| (_ok(v)) ifTrue {
+            ((lim at(2) == nil) || (v < lim at(2))) ifTrue { lim setAt(2, v) }
+            ((lim at(3) == nil) || (v > lim at(3))) ifTrue { lim setAt(3, v) } } }
+        artists each { |a|
+            k = a get("kind")
+            (k == "line" || k == "scatter") ifTrue {
+                a get("xs") each(incX)
+                a get("ys") each(incY)
+                (a get("stickyY") != nil) ifTrue { stickyY = stickyY + a get("stickyY") }
+            }
+            (k == "fill") ifTrue {
+                a get("xs") each(incX)
+                a get("y1") each(incY)
+                a get("y2") each(incY)
+            }
+            (k == "hline") ifTrue { incY value(a get("value")) }
+            (k == "vline") ifTrue { incX value(a get("value")) }
+            (k == "bars") ifTrue {
+                horiz = a get("orient") == "h"
+                a get("pos") size times { |i|
+                    span = _barSpan(a, i)
+                    base = _nth(a get("bottom"), i) ?? 0
+                    horiz ifTrue {
+                        incY value(span at(0)); incY value(span at(1))
+                        incX value(base); incX value(base + a get("lengths") at(i))
+                        stickyX append(base)
+                    } ifFalse {
+                        incX value(span at(0)); incX value(span at(1))
+                        incY value(base); incY value(base + a get("lengths") at(i))
+                        stickyY append(base)
+                    }
+                }
+            }
+            (k == "image") ifTrue {
+                e = a get("extent")
+                incX value(e at(0)); incX value(e at(1))
+                incY value(e at(2)); incY value(e at(3))
+                tight setAt(0, true)
+                tight setAt(1, true)
+            }
+        }
+        xs = _expand(lim at(0), lim at(1), tight at(0), stickyX, _rc("axes.xmargin"))
+        ys = _expand(lim at(2), lim at(3), tight at(1), stickyY, _rc("axes.ymargin"))
+        (xlimits != nil) ifTrue {
+            (xlimits at(0) != nil) ifTrue { xs setAt(0, xlimits at(0)) }
+            (xlimits at(1) != nil) ifTrue { xs setAt(1, xlimits at(1)) }
+        }
+        (ylimits != nil) ifTrue {
+            (ylimits at(0) != nil) ifTrue { ys setAt(0, ylimits at(0)) }
+            (ylimits at(1) != nil) ifTrue { ys setAt(1, ylimits at(1)) }
+        }
+        (xs at(0) == xs at(1)) ifTrue { xs setAt(1, xs at(0) + 1) }
+        (ys at(0) == ys at(1)) ifTrue { ys setAt(1, ys at(0) + 1) }
+        [xs at(0) toFloat, xs at(1) toFloat, ys at(0) toFloat, ys at(1) toFloat]
+    }
+
+    _expand(lo, hi, tight, sticky, margin) {
+        (lo == nil) ifTrue { return [0.0, 1.0] }
+        lo = lo toFloat
+        hi = hi toFloat
+        (lo == hi) ifTrue {
+            d = (lo == 0) ifTrue { 0.5 } ifFalse { lo abs * 0.05 }
+            return [lo - d, hi + d]
+        }
+        tight ifTrue { return [lo, hi] }
+        m = (hi - lo) * margin
+        a = lo - m
+        b = hi + m
+        sticky each { |s|
+            ((a < s) && (s <= lo)) ifTrue { a = s }
+            ((b > s) && (s >= hi)) ifTrue { b = s }
+        }
+        [a, b]
+    }
+
+    _computeTicks(cv, w, h) {
+        v = view
+        self xt = _axisTicks(cv, xtickSpec, v at(0), v at(1), w, true, integerX)
+        self yt = _axisTicks(cv, ytickSpec, v at(2), v at(3), h, false, integerY)
+    }
+
+    _axisTicks(cv, spec, lo, hi, length, isX, integer) {
+        a = Math min(lo, hi)
+        b = Math max(lo, hi)
+        tol = (b - a) * 0.0001
+        rot = 0
+        (spec != nil) ifTrue { rot = spec get("rotation") ?? 0 }
+        ((spec != nil) && (spec get("values") != nil)) ifTrue {
+            vals = spec get("values")
+            labs = spec get("labels") ?? (vals map { |x| PlotTicks short(x) })
+            keepV = []
+            keepL = []
+            vals size times { |i|
+                x = vals at(i)
+                ((x >= a - tol) && (x <= b + tol)) ifTrue { keepV append(x); keepL append((labs at(i) ?? "") toString) }
+            }
+            return #{values: keepV, labels: keepL, rotation: rot}
+        }
+        fs = _pt(_rc("xtick.labelsize"))
+        n = isX ifTrue { (length / (fs * 3.2)) toInt } ifFalse { (length / (fs * 2.2)) toInt }
+        n = n clamp(1, 9)
+        t = nil
+        labs = nil
+        tries = 0
+        { tries < 9 } whileTrue {
+            t = PlotTicks locate(a, b, n, integer)
+            labs = PlotTicks labels(t get("values"), t get("decimals"))
+            fits = true
+            (isX && (rot == 0)) ifTrue {
+                widest = labs reduce(0) { |m, s| Math max(m, cv measure(s, fs)) }
+                fits = ((widest + fs) * labs size) <= (length * 1.1)
+            }
+            (fits || (n <= 1)) ifTrue { break }
+            n = n - 1
+            tries = tries + 1
+        }
+        #{values: t get("values"), labels: labs, rotation: rot}
+    }
+
+    _xLabelHeight(cv, fs) {
+        rot = xt get("rotation")
+        (rot == 0) ifTrue { return fs }
+        widest = xt get("labels") reduce(0) { |m, s| Math max(m, cv measure(s, fs)) }
+        ang = (rot abs * Math pi) / 180
+        (widest * Math sin(ang)) + (fs * Math cos(ang))
+    }
+
+    _titleSize() { _pt((titleOpts ?? #{}) get("fontsize") ?? _rc("axes.titlesize")) }
+
+    // ---- helpers --------------------------------------------------------
+
+    _line(xs, ys, fmt, opts) {
+        (xs == nil) ifTrue { xs = (0..(ys size - 1)) toArray }
+        (xs size != ys size) ifTrue { raise("Plot: plot: x and y must be the same length (" + xs size toString + " and " + ys size toString + ")") }
+        f = _parseFmt(fmt)
+        marker = opts get("marker") ?? f get("marker")
+        ls = opts get("linestyle") ?? opts get("ls") ?? f get("linestyle")
+        (ls == nil) ifTrue { ls = (f get("marker") != nil) ifTrue { "none" } ifFalse { "-" } }
+        color = opts get("color") ?? opts get("c") ?? f get("color")
+        (color == nil) ifTrue { color = _nextCycle }
+        art = #{kind: "line", xs: xs, ys: ys, color: PlotColor hex(color),
+                linewidth: opts get("linewidth") ?? opts get("lw") ?? _rc("lines.linewidth"),
+                linestyle: ls, marker: marker, markersize: opts get("markersize") ?? opts get("ms"),
+                markerfacecolor: opts get("markerfacecolor") ?? opts get("mfc"),
+                markeredgecolor: opts get("markeredgecolor") ?? opts get("mec"),
+                label: opts get("label"), alpha: opts get("alpha")}
+        artists append(art)
+        art
+    }
+
+    _bars(orient, x, length, opts) {
+        xs = _seq(x)
+        lens = (length type == "Number") ifTrue { xs map { |v| length } } ifFalse { _seq(length) }
+        (xs size != lens size) ifTrue { raise("Plot: bar: positions and lengths must be the same length (" + xs size toString + " and " + lens size toString + ")") }
+        pos = xs
+        ((xs size > 0) && (xs first type == "String")) ifTrue {
+            pos = (0..(xs size - 1)) toArray
+            spec = #{values: pos, labels: xs, rotation: 0}
+            (orient == "h") ifTrue {
+                (ytickSpec == nil) ifTrue { self ytickSpec = spec }
+                self yInverted = true
+            } ifFalse {
+                (xtickSpec == nil) ifTrue { self xtickSpec = spec }
+            }
+        }
+        thick = (orient == "h") ifTrue { opts get("height") } ifFalse { opts get("width") }
+        base = (orient == "h") ifTrue { opts get("left") } ifFalse { opts get("bottom") }
+        c = opts get("color")
+        art = #{kind: "bars", orient: orient, pos: pos, lengths: lens, width: thick ?? 0.8,
+                bottom: base ?? 0, align: opts get("align") ?? "center",
+                edgecolor: _hexOrNil(opts get("edgecolor")), linewidth: opts get("linewidth"),
+                label: opts get("label"), alpha: opts get("alpha")}
+        (c type == "Array") ifTrue {
+            art set("colors", c map { |s| PlotColor hex(s) })
+            art set("color", art get("colors") first)
+        } ifFalse {
+            art set("color", PlotColor hex(c ?? _nextCycle))
+        }
+        artists append(art)
+        art
+    }
+
+    // [start, end] of bar i along its position axis
+    _barSpan(art, i) {
+        p = art get("pos") at(i)
+        w = _nth(art get("width"), i) ?? 0.8
+        (art get("align") == "edge") ifTrue { [p, p + w] } ifFalse { [p - (w / 2), p + (w / 2)] }
+    }
+
+    _refLine(kind, v, opts) {
+        art = #{kind: kind, value: v, color: PlotColor hex(opts get("color") ?? "C0"),
+                linewidth: opts get("linewidth") ?? opts get("lw") ?? _rc("lines.linewidth"),
+                linestyle: opts get("linestyle") ?? opts get("ls") ?? "-", label: opts get("label"),
+                alpha: opts get("alpha")}
+        artists append(art)
+        art
+    }
+
+    _tickSpec(values, labels, opts) {
+        (labels type == "Dict") ifTrue { opts = labels; labels = nil }
+        (values type == "Dict") ifTrue { opts = values; values = nil }
+        spec = #{values: (values == nil) ifTrue { nil } ifFalse { _seq(values) },
+                 labels: (labels == nil) ifTrue { nil } ifFalse { _seq(labels) map { |s| s toString } },
+                 rotation: (opts == nil) ifTrue { 0 } ifFalse { opts get("rotation") ?? 0 }}
+        spec
+    }
+
+    _setRange(art, values, opts) {
+        nums = values filter { |v| _ok(v) }
+        // (not `?? (... ifTrue ...)`: Clay 0.3.5 can't compile that natively)
+        lo = opts get("vmin")
+        hi = opts get("vmax")
+        (lo == nil) ifTrue { lo = (nums size > 0) ifTrue { nums min } ifFalse { 0 } }
+        (hi == nil) ifTrue { hi = (nums size > 0) ifTrue { nums max } ifFalse { 1 } }
+        art set("vmin", lo)
+        art set("vmax", hi)
+    }
+
+    // Rows of values for imshow, from rows, a flat Array or an Image
+    _grid(data, shape) {
+        (data hasMethod("floats") && data hasMethod("channels")) ifTrue {
+            w = data width
+            ch = data channels
+            fl = data floats
+            rows = []
+            data height times { |r|
+                row = []
+                w times { |c|
+                    i = ((r * w) + c) * ch
+                    (ch >= 3) ifTrue { row append([fl at(i), fl at(i + 1), fl at(i + 2)]) } ifFalse { row append(fl at(i)) }
+                }
+                rows append(row)
+            }
+            return rows
+        }
+        d = _seq(data)
+        (d size == 0) ifTrue { raise("Plot: imshow needs data") }
+        (d first type == "Array") ifTrue { return d }
+        nr = 0
+        nc = 0
+        (shape != nil) ifTrue {
+            nr = shape at(0)
+            nc = shape at(1)
+        } ifFalse {
+            side = Math round(Math sqrt(d size))
+            ((side * side) != d size) ifTrue { raise("Plot: imshow: give a flat Array its shape, #{shape: [rows, cols]}") }
+            nr = side
+            nc = side
+        }
+        ((nr * nc) != d size) ifTrue { raise("Plot: imshow: shape " + nr toString + " x " + nc toString + " needs " + (nr * nc) toString + " values, not " + d size toString) }
+        (0..(nr - 1)) map { |r| d slice(r * nc, (r + 1) * nc) }
+    }
+
+    _parseFmt(fmt) {
+        res = Dict clone
+        (fmt == nil) ifTrue { return res }
+        i = 0
+        { i < fmt length } whileTrue {
+            two = fmt slice(i, i + 2)
+            ch = fmt at(i)
+            step = 1
+            (two == "--" || two == "-.") ifTrue {
+                res set("linestyle", two)
+                step = 2
+            } ifFalse {
+                ("bgrcmykw" contains(ch)) ifTrue { res set("color", ch) } ifFalse {
+                    (".,o^v<>sDdph*+x|_" contains(ch)) ifTrue { res set("marker", ch) } ifFalse {
+                        (ch == "-" || ch == ":") ifTrue { res set("linestyle", ch) } ifFalse {
+                            raise("Plot: can't read format string \"" + fmt + "\" (colour b g r c m y k w, marker . o s ^ v < > D d p h * + x, line - -- -. :)")
+                        }
+                    }
+                }
+            }
+            i = i + step
+        }
+        res
+    }
+
+    _dash(ls, lw) {
+        ((ls == nil) || (ls == "-") || (ls == "solid")) ifTrue { return nil }
+        ((ls == "--") || (ls == "dashed")) ifTrue { return [3.7 * lw, 1.6 * lw] }
+        ((ls == ":") || (ls == "dotted")) ifTrue { return [lw, 1.65 * lw] }
+        ((ls == "-.") || (ls == "dashdot")) ifTrue { return [6.4 * lw, 1.6 * lw, lw, 1.6 * lw] }
+        (ls type == "Array") ifTrue { return ls map { |d| d * lw } }
+        raise("Plot: unknown linestyle: " + ls toString + " (use \"-\", \"--\", \":\", \"-.\" or \"none\")")
+    }
+
+    _split(list) {
+        items = list filter { |v| v != nil }
+        opts = #{}
+        ((items size > 0) && (items last type == "Dict")) ifTrue { opts = items pop }
+        fmt = nil
+        ((items size > 0) && (items last type == "String")) ifTrue { fmt = items pop }
+        [items, fmt, opts]
+    }
+
+    _seq(v) {
+        (v == nil) ifTrue { return nil }
+        t = v type
+        (t == "Array") ifTrue { return v }
+        (t == "Range") ifTrue { return v toArray }
+        (t == "Number") ifTrue { return [v] }
+        (v hasMethod("toArray")) ifTrue { return v toArray }
+        raise("Plot: expected an Array of numbers, got " + t)
+    }
+
+    _nth(v, i) { (v type == "Array") ifTrue { v at(i) } ifFalse { v } }
+
+    _copy(d) {
+        out = Dict clone
+        d each { |k, v| out set(k, v) }
+        out
+    }
+
+    _ok(v) { (v != nil) && (v type == "Number") && (v == v) }
+
+    _hexOrNil(c) { ((c == nil) || (c == "none")) ifTrue { nil } ifFalse { PlotColor hex(c) } }
+
+    _nextCycle() {
+        c = PlotColor cycleColor(nextColor)
+        self nextColor = nextColor + 1
+        c
+    }
+
+    _bin(edges, v) {
+        lo = 0
+        hi = edges size - 2
+        { lo < hi } whileTrue {
+            mid = (lo + hi + 1) / 2
+            (edges at(mid) <= v) ifTrue { lo = mid } ifFalse { hi = mid - 1 }
+        }
+        lo
+    }
+
+    _pt(v) { (v * figure dpi) / 72.0 }
+
+    _rc(key) { Plot rc get(key) }
+}
