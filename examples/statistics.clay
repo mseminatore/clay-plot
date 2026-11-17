@@ -1,0 +1,76 @@
+// Distributions, fields and annotations: box plots, violins, filled and
+// labelled contours, and twin axes with annotations. Writes
+// examples/out/statistics.png and .svg. Run from the brick's directory:
+// clay examples/statistics.clay
+import("plot")
+
+// repeatable random numbers: a Lehmer generator, and normal values from it
+// (Box-Muller; PlotTicks log10 works on Clays without Math log)
+seed = 2024
+uniform = { seed = (seed * 48271) % 2147483647; seed / 2147483647.0 }
+normal = { |mu, sd|
+    u = uniform value
+    v = uniform value
+    mu + (sd * Math sqrt(-2 * PlotTicks log10(u) * 2.302585) * Math cos(2 * Math pi * v))
+}
+
+[fig, axs] = Plot subplots(2, 2, #{figsize: [11, 8.5]})
+
+// box plots of response times, with means, and a long tail on one
+ax = axs at(0) at(0)
+times = #{
+    "v1.0": (1..120) map { |i| normal value(220, 40) },
+    "v1.1": (1..120) map { |i| normal value(180, 30) },
+    "v1.2": ((1..115) map { |i| normal value(150, 25) }) + [290, 320, 340, 360, 410],
+    "v2.0": (1..120) map { |i| normal value(120, 20) }
+}
+ax boxplot(times, #{patchArtist: true, showmeans: true, notch: true,
+                    colors: ["#c6dbef", "#9ecae1", "#6baed6", "#4292c6"],
+                    medianprops: #{color: "k"}})
+ax ylabel("response time (ms)")
+ax title("Box plots")
+
+// violins of the same kind of data, with medians and quartiles
+ax = axs at(0) at(1)
+groups = [(1..200) map { |i| normal value(0, 1) },
+          ((1..100) map { |i| normal value(-1.5, 0.5) }) + ((1..100) map { |i| normal value(1.5, 0.5) }),
+          (1..200) map { |i| normal value(0.5, 1.5) }]
+ax violinplot(groups, #{showmedians: true, quantiles: [0.25, 0.75], labels: ["normal", "two peaks", "wide"]})
+ax title("Violin plots")
+
+// a field: two hills, filled, with labelled lines on top and a colour bar
+ax = axs at(1) at(0)
+n = 60
+xs = (0..(n - 1)) map { |j| -3.0 + ((6.0 * j) / (n - 1)) }
+ys = (0..(n - 1)) map { |i| -2.0 + ((4.0 * i) / (n - 1)) }
+hill = { |x, y, cx, cy| Math pow(2.718281828, 0 - (((x - cx) * (x - cx)) + ((y - cy) * (y - cy)))) }
+z = ys map { |y| xs map { |x| (hill value(x, y, 0, 0) - hill value(x, y, 1, 1)) * 2 } }
+cf = ax contourf(xs, ys, z, 10, #{cmap: "RdBu"})
+cs = ax contour(xs, ys, z, cf get("levels"), #{colors: "k", linewidths: 0.6})
+ax clabel(cs, #{fmt: "%.1f", fontsize: 8})
+ax colorbar(cf, #{label: "height"})
+ax title("Contours")
+
+// loss and accuracy on twin axes, with the best epoch annotated
+ax = axs at(1) at(1)
+epochs = (1..30) toArray
+loss = epochs map { |e| (1.8 / (e + 1)) + 0.12 + (normal value(0, 0.01)) }
+acc = epochs map { |e| 0.97 - (0.5 / (e + 1)) + (normal value(0, 0.004)) }
+ax plot(epochs, loss, #{label: "loss"})
+ax xlabel("epoch")
+ax ylabel("loss")
+acc_ax = ax twinx
+acc_ax plot(epochs, acc, "s-", #{label: "accuracy", ms: 3})
+acc_ax ylabel("accuracy")
+best = acc indexOf(acc max)
+acc_ax annotate("best: " + PlotTicks format(acc max * 100, 1) + "%", [best + 1, acc max],
+                #{xytext: [-90, -45], textcoords: "offset points",
+                  arrowprops: #{arrowstyle: "->"}, bbox: #{fc: "white", ec: "gray"}})
+ax legend(#{loc: "center right"})
+ax title("Twin axes and annotations")
+
+out = "examples/out"
+(File isDir(out)) ifFalse { File mkdir(out) }
+fig savefig(out + "/statistics.png")
+fig savefig(out + "/statistics.svg")
+"wrote examples/out/statistics.png and .svg" println

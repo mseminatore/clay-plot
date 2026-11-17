@@ -183,6 +183,30 @@ For grouped bars, shift each group's positions by a bar width, as in matplotlib:
 `ax bar(xs map { |x| x - 0.2 }, a, #{width: 0.4})`, `ax bar(xs map { |x| x + 0.2 }, b, #{width: 0.4})`,
 then `ax xticks(xs, names)`.
 
+## Distributions, fields and annotations
+
+Box plots and violins, filled and labelled contours, and twin axes with an annotation, from
+[`examples/statistics.clay`](examples/statistics.clay):
+
+```clay norun
+ax boxplot(#{"v1.0": a, "v1.1": b, "v1.2": c}, #{notch: true, showmeans: true, patchArtist: true})
+ax violinplot([x, y, z], #{showmedians: true, quantiles: [0.25, 0.75], labels: names})
+
+cf = ax contourf(xs, ys, z, 10, #{cmap: "RdBu"})           // Z as rows; xs per column, ys per row
+cs = ax contour(xs, ys, z, cf get("levels"), #{colors: "k", linewidths: 0.6})
+ax clabel(cs, #{fmt: "%.1f"})
+ax colorbar(cf, #{label: "height"})
+
+ax plot(epochs, loss, #{label: "loss"})
+acc_ax = ax twinx                                          // shares x; its own y axis on the right
+acc_ax plot(epochs, acc, "s-", #{label: "accuracy"})
+acc_ax annotate("best", [best, acc max], #{xytext: [-90, -45], textcoords: "offset points",
+                                           arrowprops: #{arrowstyle: "->"}, bbox: #{fc: "white"}})
+ax legend                                                  // lists both axes' lines
+```
+
+![Box plots, violins, contours and twin axes](docs/images/statistics.png)
+
 ## Machine learning
 
 Plots for training and evaluating models, in the style of scikit-learn's displays. They take
@@ -334,6 +358,7 @@ clay tests/test_plot.clay          # a brick can import itself by name
 clay examples/gallery.clay         # writes example figures to examples/out/
 clay examples/ml.clay
 clay examples/dashboard.clay
+clay examples/statistics.clay
 ```
 
 `examples/fashion_mnist.clay` also needs clay-ann; its header says how to run it.

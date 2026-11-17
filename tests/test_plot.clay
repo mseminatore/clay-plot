@@ -341,6 +341,9 @@ Test describe("Box and violin plots") {
         Test assertEqual(PlotStats quantile([1, 2, 3, 4], 0.25), 1.75)
         Test assertEqual(PlotStats quantile([1, 2, 3, 4], 0.5), 2.5)
         Test assertEqual(PlotStats clean([3, nil, 1, 0.0 / 0.0, 2]), [1, 2, 3])
+        // numerically, whatever Array sort does with floats (Clay 0.3.5 compares them as text)
+        Test assertEqual(PlotStats sortNumbers([0.25, -1.5, -0.5, 2e-05, 10, -12]), [-12, -1.5, -0.5, 2e-05, 0.25, 10])
+        Test assertEqual(PlotStats boxStats([-3.5, -1.25, -0.5, 0.75, 2]) get("med"), -0.5)
         Test assertEqual(Math round(PlotStats std([2, 4, 4, 4, 5, 5, 7, 9]) * 1000), 2138)
     }
     Test it("finds whiskers and fliers") {

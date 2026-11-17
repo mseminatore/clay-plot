@@ -436,33 +436,9 @@ PlotML = Object clone {
         #{positives: ps size, negatives: ns size, steps: steps}
     }
 
-    // Numbers from largest to smallest. (Array sort in Clay 0.3.5 compares
-    // anything but two integers as text, so 2e-05 sorts after 0.5; this is a
-    // merge sort that compares numbers.)
-    _descending(values) {
-        n = values size
-        a = values
-        width = 1
-        { width < n } whileTrue {
-            out = []
-            lo = 0
-            { lo < n } whileTrue {
-                mid = Math min(lo + width, n)
-                hi = Math min(lo + (width * 2), n)
-                i = lo
-                j = mid
-                { (i < mid) && (j < hi) } whileTrue {
-                    (a at(i) >= a at(j)) ifTrue { out append(a at(i)); i = i + 1 } ifFalse { out append(a at(j)); j = j + 1 }
-                }
-                { i < mid } whileTrue { out append(a at(i)); i = i + 1 }
-                { j < hi } whileTrue { out append(a at(j)); j = j + 1 }
-                lo = hi
-            }
-            a = out
-            width = width * 2
-        }
-        a
-    }
+    // Numbers from largest to smallest (see PlotStats sortNumbers for why
+    // not Array sort)
+    _descending(values) { PlotStats sortNumbers(values) reverse }
 
     // ---- grids of images --------------------------------------------------
 

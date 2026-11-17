@@ -58,7 +58,7 @@ PlotContour = Object clone {
     levels(g, spec, filled) {
         ((spec != nil) && (spec type != "Number")) ifTrue {
             l = (spec type == "Range") ifTrue { spec toArray } ifFalse { spec }
-            return l sort
+            return PlotStats sortNumbers(l)
         }
         [lo, hi] = range(g)
         (lo == nil) ifTrue { return [] }
