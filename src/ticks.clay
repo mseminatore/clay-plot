@@ -99,12 +99,13 @@ PlotTicks = Object clone {
         (neg && n != 0) ifTrue { minus + text } ifFalse { text }
     }
 
-    // log10 of a positive number (Clay's Math has no logarithm): split off
-    // the power of two, then ln(m) = 2 atanh((m - 1) / (m + 1)) for m in
-    // [1, 2), whose series converges quickly there
+    // log10 of a positive number, nil for others. Clays without Math log
+    // get it here: split off the power of two, then ln(m) = 2 atanh((m - 1)
+    // / (m + 1)) for m in [1, 2), whose series converges quickly there
     log10(x) {
         v = x toFloat
         (v <= 0) ifTrue { return nil }
+        (Math hasMethod("log")) ifTrue { return Math log(v, 10) }
         k = 0
         { v >= 2.0 } whileTrue { v = v / 2; k = k + 1 }
         { v < 1.0 } whileTrue { v = v * 2; k = k - 1 }
