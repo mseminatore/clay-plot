@@ -273,6 +273,106 @@ Test describe("SVG output") {
     }
 }
 
+Test describe("PlotML") {
+    Test it("computes ROC curves and their AUC") {
+        r = PlotML rocCurve([0.1, 0.4, 0.35, 0.8], [0, 0, 1, 1])
+        Test assertEqual(r get("fpr"), [0, 0, 0.5, 0.5, 1])
+        Test assertEqual(r get("tpr"), [0, 0.5, 0.5, 1, 1])
+        Test assertEqual(r get("auc"), 0.75)
+        Test assertEqual(PlotML rocCurve([0.9, 0.8, 0.2, 0.1], [true, true, false, false]) get("auc"), 1)
+        e = Test assertRaises({ PlotML rocCurve([0.1, 0.2], [1, 1]) })
+        Test assertTrue(e message contains("both positive and negative"))
+    }
+    Test it("orders scores as numbers, small floats included") {
+        Test assertEqual(PlotML _descending([0.0001, 0.00009, 0.5, 0.00002, 0.3, 1, 10, 9.5]),
+                         [10, 9.5, 1, 0.5, 0.3, 0.0001, 0.00009, 0.00002])
+        Test assertEqual(PlotML _descending([]), [])
+        r = PlotML rocCurve([0.00002, 0.5, 0.0001, 0.3], [0, 1, 0, 1])
+        Test assertEqual(r get("auc"), 1)
+        r = PlotML rocCurve([0.00002, 0.5, 0.0001, 0.3], [1, 0, 1, 0])
+        Test assertEqual(r get("auc"), 0)
+    }
+    Test it("counts tied scores once") {
+        r = PlotML rocCurve([0.5, 0.5, 0.5, 0.5], [0, 1, 0, 1])
+        Test assertEqual([r get("fpr"), r get("tpr"), r get("auc")], [[0, 1], [0, 1], 0.5])
+    }
+    Test it("computes precision-recall and average precision") {
+        r = PlotML prCurve([0.1, 0.4, 0.35, 0.8], [0, 0, 1, 1])
+        Test assertEqual(r get("recall"), [0, 0.5, 0.5, 1, 1])
+        Test assertEqual(Math round(r get("ap") * 10000), 8333)
+    }
+    Test it("builds confusion matrices") {
+        Test assertEqual(PlotML confusion([0, 1, 2, 2, 1], [0, 2, 2, 2, 1]), [[1, 0, 0], [0, 1, 1], [0, 0, 2]])
+        Test assertEqual(PlotML confusion([0], [0], 2), [[1, 0], [0, 0]])
+    }
+    Test it("draws a learning curve from net history rows, marking the best epoch") {
+        Plot close
+        hist = [[1.0, 0.01, -1], [0.6, 0.01, 0.7], [0.4, 0.01, 0.5], [0.3, 0.01, 0.55]]
+        lines = Plot learningCurve(hist)
+        Test assertEqual(lines size, 2)
+        Test assertEqual(lines at(1) get("ys"), [nil, 0.7, 0.5, 0.55])
+        best = Plot gca artists find { |a| a get("kind") == "vline" }
+        Test assertEqual(best get("value"), 3)
+        Test assertEqual(Plot gca xlabelText, "epoch")
+    }
+    Test it("draws learning curves from a Dict or a list of losses") {
+        Plot close
+        Test assertEqual((Plot learningCurve(#{loss: [3, 2, 1], accuracy: [0.5, 0.7, 0.9]})) size, 2)
+        Plot close
+        Test assertEqual((Plot learningCurve([3, 2, 1], #{best: false})) size, 1)
+        Test assertEqual(Plot gca artists size, 1)
+    }
+    Test it("annotates a confusion matrix with readable colours") {
+        Plot close
+        Plot confusionMatrix([[50, 2], [5, 43]], #{labels: ["cat", "dog"]})
+        texts = Plot gca artists filter { |a| a get("kind") == "text" }
+        Test assertEqual(texts map { |a| a get("text") }, ["50", "2", "5", "43"])
+        Test assertEqual(texts first get("color"), "#ffffff")   // dark cell
+        Test assertEqual(texts at(1) get("color"), "#000000")   // light cell
+        Test assertEqual(Plot gca xtickSpec get("labels"), ["cat", "dog"])
+    }
+    Test it("normalizes a confusion matrix by row") {
+        Plot close
+        img = Plot confusionMatrix([[3, 1], [0, 0]], #{normalize: "true"})
+        Test assertEqual(img get("rows"), [[0.75, 0.25], [0, 0]])
+        texts = Plot gca artists filter { |a| a get("kind") == "text" }
+        Test assertEqual(texts first get("text"), "0.75")
+    }
+    Test it("draws one ROC curve per class for rows of scores") {
+        Plot close
+        // class b: positives score 0.7 and 0.15, negatives 0.1 and 0.2, so
+        // 3 of the 4 positive-negative pairs are in order
+        scores = [[0.8, 0.1, 0.1], [0.2, 0.7, 0.1], [0.1, 0.2, 0.7], [0.6, 0.15, 0.25]]
+        res = Plot roc(scores, [0, 1, 2, 1], #{labels: ["a", "b", "c"]})
+        Test assertEqual(res size, 3)
+        Test assertEqual(res map { |r| r get("auc") }, [1, 0.75, 1])
+        labels = Plot gca artists map { |a| a get("label") }
+        Test assertTrue(labels contains("b, AUC 0.750"))
+        Test assertTrue(labels contains("chance"))
+        Plot close
+        one = Plot roc([[0.9], [0.2]], [[1], [0]])   // clay-ann style rows of one output
+        Test assertEqual(one get("auc"), 1)
+    }
+    Test it("makes a grid of images, marking wrong predictions") {
+        Plot close
+        imgs = (1..5) map { |i| (1..16) map { |p| (p * i) % 7 } }
+        fig = Plot imageGrid(imgs, #{cols: 3, predicted: [1, 2, 3, 4, 5], actual: [1, 2, 0, 4, 5], labels: ["zero", "one", "two", "three", "four", "five"]})
+        Test assertEqual(fig axes size, 6)                  // 2 rows of 3, the last empty
+        third = fig axes at(2)
+        Test assertEqual(third titleText, "three (zero)")
+        Test assertEqual(third titleOpts get("color"), "C3")
+        Test assertEqual(fig axes first titleText, "one")
+        Test assertEqual(Plot gcf, fig)
+        Test assertFalse(fig axes last axisVisible)
+    }
+    Test it("shares a symmetric range across a grid of weights") {
+        Plot close
+        fig = Plot imageGrid([[[1, -2], [0, 0.5]], [[3, 0], [0, 0]]], #{symmetric: true})
+        art = fig axes first artists first
+        Test assertEqual([art get("vmin"), art get("vmax"), art get("cmap")], [-3, 3, "coolwarm"])
+    }
+}
+
 Test describe("PNG output") {
     Test it("saves .png files at the figure's size, or another dpi") {
         Plot close

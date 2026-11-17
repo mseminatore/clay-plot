@@ -1,0 +1,75 @@
+// Fashion-MNIST with clay-ann, then plots of what the network learned:
+// a learning curve, a confusion matrix, ROC curves and a grid of test
+// images with the network's guesses (wrong ones in red).
+//
+// It needs clay-ann as well as plot. In a project with both
+//   clay bricks add github.com/mseminatore/clay-ann ann
+//   clay bricks add github.com/mseminatore/clay-plot plot
+// run
+//   clay bricks/plot/examples/fashion_mnist.clay [file.csv] [--epochs n]
+// The default file is the Fashion-MNIST test set that comes with clay-ann
+// (10,000 images): a fifth is held back for testing. Figures go to
+// fashion_mnist_*.png in the current directory.
+import("ann")
+import("plot")
+
+path = "bricks/ann/native/libann/data/fashion-mnist_test.csv"
+epochs = 12
+args = System args
+i = 0
+{ i < args size } whileTrue {
+    (args at(i) == "--epochs") ifTrue { i = i + 1; epochs = (args at(i)) toInt } ifFalse { path = args at(i) }
+    i = i + 1
+}
+names = ["T-shirt", "Trouser", "Pullover", "Dress", "Coat", "Sandal", "Shirt", "Sneaker", "Bag", "Ankle boot"]
+
+// --- data -------------------------------------------------------------------
+
+Ann seed(1)
+[train, test] = (Ann loadCsv(path, true)) shuffle split(0.8)
+[fit, valid] = train split(0.9)
+xTrain = (fit columns(1)) scale(255)
+yTrain = (fit column(0)) oneHot(10)
+xValid = (valid columns(1)) scale(255)
+yValid = (valid column(0)) oneHot(10)
+xTest = (test columns(1)) scale(255)
+yTest = (test column(0)) oneHot(10)
+labels = ((test column(0)) toArray) map { |row| row first toInt }
+("${xTrain rows} training, ${xValid rows} validation, ${xTest rows} test images") println
+
+// --- training -----------------------------------------------------------------
+
+net = Ann network(#{"loss": "cross_entropy", "learningRate": 0.001, "quiet": true})
+net input(784)
+net dense(128, "relu")
+net output(10, "softmax")
+history = net fit(xTrain, yTrain, #{"epochs": epochs, "batchSize": 32, "validation": [xValid, yValid], "patience": 3,
+                         "onEpoch": { |e| ("epoch " + e get("epoch") toString) println }})
+("test accuracy " + (Math round(net accuracy(xTest, yTest) * 1000) / 10.0) toString + "%") println
+
+// --- plots --------------------------------------------------------------------
+
+// training and validation loss per epoch, the best epoch marked
+Plot figure(#{figsize: [6.4, 4]})
+Plot learningCurve(history, #{title: "Fashion-MNIST, dense 128"})
+Plot savefig("fashion_mnist_history.png")
+
+// which classes are mistaken for which: rows sum to 1
+Plot figure(#{figsize: [7.5, 6.5]})
+Plot confusionMatrix(net confusionMatrix(xTest, yTest), #{labels: names, normalize: "true", rotation: 45})
+Plot title("Confusion matrix (share of each actual class)")
+Plot savefig("fashion_mnist_confusion.png")
+
+// one ROC curve per class, from the network's probabilities
+probs = (net predictBatch(xTest)) toArray
+Plot figure(#{figsize: [6, 6]})
+Plot roc(probs, labels, #{labels: names, title: "ROC, one class against the rest"})
+Plot savefig("fashion_mnist_roc.png")
+
+// the first 30 test images with the network's guesses
+guesses = probs map { |p| PlotML argmax(p) }
+Plot imageGrid((0..29) map { |k| xTest row(k) }, #{cols: 10, predicted: guesses slice(0, 30),
+               actual: labels slice(0, 30), labels: names, title: "Guesses (actual class in brackets when wrong)"})
+Plot savefig("fashion_mnist_samples.png")
+
+"wrote fashion_mnist_history.png, _confusion.png, _roc.png, _samples.png" println

@@ -135,55 +135,61 @@ Colormaps: `viridis` (the default), `plasma`, `inferno`, `magma`, `cividis`, `gr
 (`"gray_r"`). `PlotColor colormap("viridis", 0.3)` gives the `[r, g, b]` at a point, and
 `PlotColor hex(spec)` turns any colour into `"#rrggbb"`.
 
-## Recipes for neural networks
+## Machine learning
 
-These use [clay-ann](https://github.com/mseminatore/clay-ann)'s results, but are only arrays
-of numbers, so they work with any data.
+Plots for training and evaluating models, in the style of scikit-learn's displays. They take
+plain Arrays of numbers (or anything with `toArray`, such as clay-ann's `AnnData`), so they work
+with [clay-ann](https://github.com/mseminatore/clay-ann) without depending on it. The figures
+below are from [`examples/fashion_mnist.clay`](examples/fashion_mnist.clay): a small network
+trained on Fashion-MNIST with clay-ann.
 
-**Learning curve.** `net history` has a row `[loss, learningRate, validationLoss]` per epoch,
-with -1 where there was no validation data:
+| | |
+|---|---|
+| `learningCurve(history, opts)` | Loss per epoch, from what clay-ann's `fit` returns (a Dict per epoch), `net history` rows (`[loss, learningRate, validationLoss]`, -1 for none), an Array of losses, or a Dict of named series (`#{loss: [...], accuracy: [...]}`). Marks the best epoch: the lowest validation loss (or training loss); `best:` an epoch number or `false`. Also `title`, `xlabel`, `ylabel`. |
+| `confusionMatrix(matrix, opts)` | A confusion matrix (rows: actual class) as a heatmap with its values in the cells, in black or white to stand out. `labels` (class names), `normalize` (`"true"`: each row sums to 1, `"pred"`: columns, `"all"`), `cmap` (`"Blues"`), `colorbar` (`true`), `annotate` (`true` up to 30 classes), `rotation` (of the x labels), `title`. |
+| `roc(scores, targets, opts)` | ROC curves with their AUC. `scores` are numbers (higher: more likely positive) with targets 1/0 or true/false, or rows of class scores (one curve per class, one against the rest) with targets as class numbers or one-hot rows. `labels`, `label`, `chance` (`true`: the diagonal), `title`. Returns the curve, `#{fpr:, tpr:, thresholds:, auc:}`, or one per class. |
+| `precisionRecall(scores, targets, opts)` | Precision-recall curves with their average precision, the same way. Returns `#{precision:, recall:, thresholds:, ap:}` (or one per class). |
+| `Plot imageGrid(images, opts)` | A new figure of images, one per axes: rows, flat Arrays or `Image`s. `cols` (up to 10), `shape`, `cmap` (`"gray"`), `vmin`, `vmax`, `symmetric` (`true`: one range centred on 0 for all, with `"coolwarm"`, for weights and filters), `titles`, `predicted` and `actual` (class numbers or rows of scores: titled with the prediction, and the actual class in red when wrong), `labels` (class names), `title`, `size` (inches per image). Returns the figure. |
 
-```clay
-h = net history
-Plot plot(h map { |r| r at(0) }, #{label: "train"})
-Plot plot(h map { |r| (r at(2) < 0) ifTrue { nil } ifFalse { r at(2) } }, #{label: "validation"})
-Plot xlabel("epoch"); Plot ylabel("loss"); Plot legend
-Plot savefig("history.svg")
-```
-
-**Confusion matrix**, with counts in the cells:
-
-```clay
-cm = net confusionMatrix(xTest, yTest)
-Plot imshow(cm, #{cmap: "Blues"})
-Plot colorbar
-cm size times { |r| cm size times { |c|
-    v = cm at(r) at(c)
-    Plot text(c, r, v toString, #{ha: "center", va: "center", color: (v > 500) ifTrue { "white" } ifFalse { "black" }})
-} }
-Plot xlabel("predicted"); Plot ylabel("actual")
-```
-
-![A confusion matrix](docs/images/confusion.svg)
-
-**A grid of samples** (MNIST rows are 784 numbers, shown as 28 x 28):
+The first four are axes methods too (`ax roc(...)`). `PlotML rocCurve(scores, targets)`,
+`PlotML prCurve(scores, targets)` and `PlotML confusion(actual, predicted)` compute without
+drawing, and `PlotML argmax(row)` is the class a row of scores picks.
 
 ```clay
-[fig, axs] = Plot subplots(2, 5, #{figsize: [8, 3.6]})
-10 times { |i|
-    ax = axs at(i / 5) at(i % 5)
-    ax imshow(xTest at(i), #{cmap: "gray"})
-    ax title("pred " + (preds at(i)) toString, #{fontsize: 9})
-    ax axis("off")
-}
-fig savefig("samples.svg")
+history = net fit(xTrain, yTrain, #{"epochs": 12, "validation": [xValid, yValid], "patience": 3})
+Plot learningCurve(history)
+Plot savefig("history.png")
 ```
 
-![A grid of samples](docs/images/digits.svg)
+![A learning curve](docs/images/fashion_mnist_history.png)
 
-Weight matrices, convolution filters and spectrograms are `imshow` too (a diverging map such
-as `coolwarm` with `vmin: -m, vmax: m` suits weights). A spectrogram, one row per mel band,
-lowest band at the bottom:
+```clay
+names = ["T-shirt", "Trouser", "Pullover", "Dress", "Coat", "Sandal", "Shirt", "Sneaker", "Bag", "Ankle boot"]
+Plot figure(#{figsize: [7.5, 6.5]})
+Plot confusionMatrix(net confusionMatrix(xTest, yTest), #{labels: names, normalize: "true", rotation: 45})
+```
+
+![A confusion matrix](docs/images/fashion_mnist_confusion.png)
+
+```clay
+probs = (net predictBatch(xTest)) toArray      // a row of 10 probabilities per image
+Plot roc(probs, labels, #{labels: names})       // labels: the class number of each image
+```
+
+![ROC curves](docs/images/fashion_mnist_roc.png)
+
+```clay
+guesses = probs map { |p| PlotML argmax(p) }
+Plot imageGrid((0..29) map { |k| xTest row(k) }, #{cols: 10, predicted: guesses slice(0, 30),
+               actual: labels slice(0, 30), labels: names})
+```
+
+![Test images with the network's guesses](docs/images/fashion_mnist_samples.png)
+
+Weight matrices, convolution filters and spectrograms are `imshow` too: a diverging map such
+as `coolwarm` with `vmin: -m, vmax: m` suits weights, and `Plot imageGrid(filters,
+#{symmetric: true})` shows a layer's filters on one shared scale. A spectrogram, one row per
+mel band, lowest band at the bottom:
 
 ```clay
 Plot figure(#{figsize: [8, 3.5]})
@@ -221,6 +227,8 @@ clay tests/test_plot.clay          # a brick can import itself by name
 clay examples/gallery.clay         # writes example figures to examples/out/
 clay examples/ml.clay
 ```
+
+`examples/fashion_mnist.clay` also needs clay-ann; its header says how to run it.
 
 The code is in `src/`: `main.clay` (`Plot`, the pyplot-style functions and `rc`),
 `figure.clay` (`PlotFigure`: layout and saving), `axes.clay` (`PlotAxes`: artists, scales,

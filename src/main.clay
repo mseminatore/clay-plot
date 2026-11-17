@@ -29,6 +29,7 @@ import("svg.clay")
 import("png.clay")
 import("axes.clay")
 import("figure.clay")
+import("ml.clay")
 
 Plot = Object clone {
     current = nil
@@ -113,6 +114,16 @@ Plot = Object clone {
     text(x, y, s, opts = nil) { gca text(x, y, s, opts) }
     imshow(data, opts = nil) { gca imshow(data, opts) }
     colorbar(art = nil, opts = nil) { gca colorbar(art, opts) }
+
+    // ---- machine learning (ml.clay) ----------------------------------------
+
+    learningCurve(history, opts = nil) { gca learningCurve(history, opts) }
+    confusionMatrix(matrix, opts = nil) { gca confusionMatrix(matrix, opts) }
+    roc(scores, targets, opts = nil) { gca roc(scores, targets, opts) }
+    precisionRecall(scores, targets, opts = nil) { gca precisionRecall(scores, targets, opts) }
+
+    // A new figure of images in a grid; see PlotML imageGrid for the options
+    imageGrid(images, opts = nil) { PlotML imageGrid(images, opts ?? #{}) }
 
     // ---- labels and settings (on the current axes) ------------------------
 

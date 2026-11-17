@@ -246,6 +246,22 @@ PlotAxes = Object clone {
         target
     }
 
+    // ---- machine-learning plots (ml.clay) --------------------------------
+
+    // Training history: what clay-ann's fit returns (a Dict per epoch), net
+    // history rows [loss, learningRate, validationLoss] (-1 for none), an
+    // Array of losses, or a Dict of named series
+    learningCurve(history, opts = nil) { PlotML learningCurve(self, history, opts ?? #{}) }
+
+    // A confusion matrix (rows: actual class) as an annotated heatmap
+    confusionMatrix(matrix, opts = nil) { PlotML confusionMatrix(self, matrix, opts ?? #{}) }
+
+    // ROC curves (one per class for rows of scores), with their AUC
+    roc(scores, targets, opts = nil) { PlotML roc(self, scores, targets, opts ?? #{}) }
+
+    // Precision-recall curves, with their average precision
+    precisionRecall(scores, targets, opts = nil) { PlotML precisionRecall(self, scores, targets, opts ?? #{}) }
+
     // ---- labels and settings --------------------------------------------
 
     title(s, opts = nil) { self titleText = s; self titleOpts = opts ?? #{}; self }
@@ -418,7 +434,8 @@ PlotAxes = Object clone {
             loc = titleOpts get("loc") ?? "center"
             tx = (loc == "left") ifTrue { bx } ifFalse { (loc == "right") ifTrue { bx + bw } ifFalse { bx + (bw / 2) } }
             anchor = (loc == "left") ifTrue { "start" } ifFalse { (loc == "right") ifTrue { "end" } ifFalse { "middle" } }
-            cv text(tx, by - _pt(6), titleText, #{size: _titleSize, anchor: anchor, valign: "bottom"})
+            cv text(tx, by - _pt(6), titleText, #{size: _titleSize, anchor: anchor, valign: "bottom",
+                                                  color: PlotColor hex(titleOpts get("color") ?? "k")})
         }
         (legendOpts != nil) ifTrue { _drawLegend(cv) }
         (colorbarArtist != nil) ifTrue { _drawColorbar(cv) }

@@ -1,0 +1,438 @@
+// PlotML -- plots for machine learning: learning curves, confusion
+// matrices, ROC and precision-recall curves, grids of images
+//
+//   Plot learningCurve(net history)
+//   Plot confusionMatrix(net confusionMatrix(x, y), #{labels: names})
+//   Plot roc(scores, targets)              // returns #{fpr:, tpr:, thresholds:, auc:}
+//   Plot imageGrid(xTest slice(0, 20), #{predicted: p, actual: y})
+//
+// They take plain Arrays of numbers, so they work with clay-ann's results
+// without depending on it. The drawing methods are also axes methods
+// (ax roc(...)); the curves alone come from PlotML rocCurve, prCurve and
+// confusion.
+
+PlotML = Object clone {
+
+    // ---- computations ---------------------------------------------------
+
+    // The ROC curve of scores (higher means more likely positive) against
+    // targets (1/true positive, 0/false negative): #{fpr:, tpr:,
+    // thresholds:, auc:}. One point per distinct score, from (0, 0) to (1, 1).
+    rocCurve(scores, targets) {
+        sweep = _sweep(scores, targets)
+        fpr = [0.0]
+        tpr = [0.0]
+        th = [nil]
+        p = sweep get("positives") toFloat
+        n = sweep get("negatives") toFloat
+        sweep get("steps") each { |s|
+            fpr append(s at(2) / n)
+            tpr append(s at(1) / p)
+            th append(s at(0))
+        }
+        auc = 0.0
+        (fpr size - 1) times { |i|
+            auc = auc + (((fpr at(i + 1) - fpr at(i)) * (tpr at(i + 1) + tpr at(i))) / 2)
+        }
+        #{fpr: fpr, tpr: tpr, thresholds: th, auc: auc}
+    }
+
+    // The precision-recall curve: #{precision:, recall:, thresholds:, ap:},
+    // ap being the average precision (sum over thresholds of the recall
+    // gained times the precision there)
+    prCurve(scores, targets) {
+        sweep = _sweep(scores, targets)
+        p = sweep get("positives") toFloat
+        precision = [1.0]
+        recall = [0.0]
+        th = [nil]
+        ap = 0.0
+        sweep get("steps") each { |s|
+            tp = s at(1)
+            fp = s at(2)
+            r = tp / p
+            pr = tp / (tp + fp) toFloat
+            ap = ap + ((r - recall last) * pr)
+            precision append(pr)
+            recall append(r)
+            th append(s at(0))
+        }
+        #{precision: precision, recall: recall, thresholds: th, ap: ap}
+    }
+
+    // A confusion matrix from class numbers: rows are the actual class,
+    // columns the predicted one. n classes (default: the largest + 1).
+    confusion(actual, predicted, n = nil) {
+        (actual size != predicted size) ifTrue { raise("Plot: confusion: actual and predicted must be the same length") }
+        k = n
+        (k == nil) ifTrue { k = Math max(actual max, predicted max) + 1 }
+        m = (1..k) map { |i| (1..k) map { |j| 0 } }
+        actual size times { |i|
+            row = m at(actual at(i))
+            c = predicted at(i)
+            row setAt(c, row at(c) + 1)
+        }
+        m
+    }
+
+    // ---- learning curves ------------------------------------------------
+
+    learningCurve(ax, history, opts) {
+        series = _historySeries(history)
+        (series size == 0) ifTrue { raise("Plot: learningCurve needs a history") }
+        lines = []
+        series each { |s|
+            ys = s at(1)
+            xs = (1..(ys size)) toArray
+            o = #{label: s at(0)}
+            ((s at(0) == "validation") || (s at(0) == "val_loss")) ifTrue { o set("linestyle", "--") }
+            lines append(ax plot(xs, ys, o))
+        }
+        // mark the best epoch: given, or where validation (else training) loss is lowest
+        best = opts get("best")
+        (best == nil) ifTrue { best = true }
+        (best == true) ifTrue {
+            target = series find { |s| (s at(0) == "validation") || (s at(0) == "val_loss") }
+            (target == nil) ifTrue { target = series first }
+            best = _argmin(target at(1))
+            (best != nil) ifTrue { best = best + 1 }
+        }
+        (best == false) ifTrue { best = nil }
+        (best != nil) ifTrue {
+            ax axvline(best, #{color: "gray", linestyle: ":", lw: 1, label: "best epoch (" + best toString + ")"})
+        }
+        ax xlabel(opts get("xlabel") ?? "epoch")
+        ax ylabel(opts get("ylabel") ?? "loss")
+        (opts get("title") != nil) ifTrue { ax title(opts get("title")) }
+        ax grid(true, #{alpha: 0.5})
+        ax legend
+        lines
+    }
+
+    // [[name, values], ...] from net history rows, an Array of numbers or a Dict
+    _historySeries(history) {
+        (history type == "Dict") ifTrue {
+            return history keys map { |k| [k, _gaps(history get(k))] }
+        }
+        h = (history type == "Array") ifTrue { history } ifFalse { history toArray }
+        (h size == 0) ifTrue { return [] }
+        // what net fit returns: a Dict per epoch, #{epoch:, loss:, valLoss:, lr:}
+        (h first type == "Dict") ifTrue {
+            out = []
+            h first keys each { |k|
+                ((k != "epoch") && (k != "lr")) ifTrue {
+                    name = k
+                    (k == "loss") ifTrue { name = "train" }
+                    (k == "valLoss") ifTrue { name = "validation" }
+                    out append([name, _gaps(h map { |e| e get(k) })])
+                }
+            }
+            return out
+        }
+        (h first type == "Array") ifFalse { return [["loss", _gaps(h)]] }
+        out = [["train", _gaps(h map { |r| r at(0) })]]
+        ((h first size > 2) && ((h filter { |r| (r at(2) != nil) && (r at(2) >= 0) }) size > 0)) ifTrue {
+            out append(["validation", _gaps(h map { |r| r at(2) })])
+        }
+        out
+    }
+
+    // nil for values that mean "none" (nil, nan, negative placeholders)
+    _gaps(values) {
+        values map { |v|
+            ((v == nil) || (v != v) || (v < 0)) ifTrue { nil } ifFalse { v }
+        }
+    }
+
+    _argmin(values) {
+        best = nil
+        at = nil
+        values size times { |i|
+            v = values at(i)
+            ((v != nil) && ((best == nil) || (v < best))) ifTrue { best = v; at = i }
+        }
+        at
+    }
+
+    // ---- confusion matrices ---------------------------------------------
+
+    // opts: labels (class names), normalize (nil, "true": rows sum to 1,
+    // "pred": columns, "all"), cmap ("Blues"), colorbar (true), annotate
+    // (true up to 30 classes), rotation (of the x labels)
+    confusionMatrix(ax, matrix, opts) {
+        k = matrix size
+        values = _normalize(matrix, opts get("normalize"))
+        cmap = opts get("cmap") ?? "Blues"
+        lo = 0
+        hi = (values map { |row| row max }) max
+        (opts get("normalize") != nil) ifTrue { hi = 1 }
+        img = ax imshow(values, #{cmap: cmap, vmin: lo, vmax: hi})
+        (opts get("colorbar") != false) ifTrue { ax colorbar(img) }
+        annotate = opts get("annotate")
+        (annotate == nil) ifTrue { annotate = k <= 30 }
+        annotate ifTrue {
+            fs = (k <= 10) ifTrue { 10 } ifFalse { (k <= 20) ifTrue { 7 } ifFalse { 5 } }
+            span = (hi - lo) toFloat
+            (span == 0) ifTrue { span = 1.0 }
+            k times { |r|
+                k times { |c|
+                    v = values at(r) at(c)
+                    text = (opts get("normalize") != nil) ifTrue { PlotTicks format(v, 2) } ifFalse { PlotTicks short(v) }
+                    ax text(c, r, text, #{ha: "center", va: "center", fontsize: fs,
+                                          color: _contrast(cmap, (v - lo) / span)})
+                }
+            }
+        }
+        ticks = (0..(k - 1)) toArray
+        names = opts get("labels")
+        (names == nil) ifTrue { names = ticks map { |i| i toString } }
+        ax xticks(ticks, names, #{rotation: opts get("rotation") ?? 0})
+        ax yticks(ticks, names)
+        ax xlabel(opts get("xlabel") ?? "predicted")
+        ax ylabel(opts get("ylabel") ?? "actual")
+        (opts get("title") != nil) ifTrue { ax title(opts get("title")) }
+        img
+    }
+
+    _normalize(matrix, how) {
+        (how == nil) ifTrue { return matrix }
+        (how == "true") ifTrue {
+            return matrix map { |row|
+                s = row sum
+                row map { |v| (s == 0) ifTrue { 0.0 } ifFalse { v / s toFloat } }
+            }
+        }
+        (how == "pred") ifTrue {
+            sums = (0..(matrix first size - 1)) map { |c| (matrix map { |row| row at(c) }) sum }
+            return matrix map { |row|
+                (0..(row size - 1)) map { |c| (sums at(c) == 0) ifTrue { 0.0 } ifFalse { row at(c) / sums at(c) toFloat } }
+            }
+        }
+        (how == "all") ifTrue {
+            total = (matrix map { |row| row sum }) sum
+            return matrix map { |row| row map { |v| (total == 0) ifTrue { 0.0 } ifFalse { v / total toFloat } } }
+        }
+        raise("Plot: confusionMatrix normalize is \"true\", \"pred\" or \"all\"")
+    }
+
+    // Black or white, whichever reads better on the colormap's colour at t
+    _contrast(cmap, t) {
+        c = PlotColor colormap(cmap, t)
+        lum = (0.299 * c at(0)) + (0.587 * c at(1)) + (0.114 * c at(2))
+        (lum > 140) ifTrue { "#000000" } ifFalse { "#ffffff" }
+    }
+
+    // ---- ROC and precision-recall -----------------------------------------
+
+    // opts: labels (class names for rows of scores), label (one curve's
+    // name), chance (true: the diagonal), title
+    roc(ax, scores, targets, opts) {
+        curves = _perClass(scores, targets)
+        results = []
+        curves each { |cl|
+            r = rocCurve(cl at(1), cl at(2))
+            name = _curveName(cl at(0), opts, curves size)
+            ax plot(r get("fpr"), r get("tpr"), #{label: name + "AUC " + PlotTicks format(r get("auc"), 3)})
+            results append(r)
+        }
+        (opts get("chance") != false) ifTrue { ax plot([0, 1], [0, 1], "k--", #{lw: 1, alpha: 0.6, label: "chance"}) }
+        _unitAxes(ax, opts get("xlabel") ?? "false positive rate", opts get("ylabel") ?? "true positive rate", opts)
+        ax legend(#{loc: "lower right"})
+        (results size == 1) ifTrue { results first } ifFalse { results }
+    }
+
+    precisionRecall(ax, scores, targets, opts) {
+        curves = _perClass(scores, targets)
+        results = []
+        curves each { |cl|
+            r = prCurve(cl at(1), cl at(2))
+            name = _curveName(cl at(0), opts, curves size)
+            ax plot(r get("recall"), r get("precision"), #{label: name + "AP " + PlotTicks format(r get("ap"), 3)})
+            results append(r)
+        }
+        _unitAxes(ax, opts get("xlabel") ?? "recall", opts get("ylabel") ?? "precision", opts)
+        ax legend(#{loc: "lower left"})
+        (results size == 1) ifTrue { results first } ifFalse { results }
+    }
+
+    _curveName(index, opts, count) {
+        (count == 1) ifTrue {
+            l = opts get("label")
+            return (l == nil) ifTrue { "" } ifFalse { l + ", " }
+        }
+        names = opts get("labels")
+        (names == nil) ifTrue { return "class " + index toString + ", " }
+        names at(index) toString + ", "
+    }
+
+    _unitAxes(ax, xl, yl, opts) {
+        ax xlim(0, 1)
+        ax ylim(0, 1.02)
+        ax xlabel(xl)
+        ax ylabel(yl)
+        ax grid(true, #{alpha: 0.5})
+        (opts get("title") != nil) ifTrue { ax title(opts get("title")) }
+    }
+
+    // [[classIndex, scores, targets], ...]: one entry for binary scores, one
+    // per class (one against the rest) for rows of scores. Targets are 0/1,
+    // true/false, class numbers, or one-hot rows.
+    _perClass(scores, targets) {
+        s = _seq(scores)
+        t = _seq(targets)
+        (s size != t size) ifTrue { raise("Plot: scores and targets must be the same length (" + s size toString + " and " + t size toString + ")") }
+        (s size == 0) ifTrue { raise("Plot: no scores") }
+        ((s first type == "Array") && (s first size == 1)) ifTrue { s = s map { |r| r first } }
+        ((t first type == "Array") && (t first size == 1)) ifTrue { t = t map { |r| r first } }
+        (s first type == "Array") ifFalse { return [[0, s, t]] }
+        k = s first size
+        (0..(k - 1)) map { |c|
+            col = s map { |row| row at(c) }
+            hit = t map { |y| (y type == "Array") ifTrue { y at(c) > 0.5 } ifFalse { y == c } }
+            [c, col, hit]
+        }
+    }
+
+    // Walk the thresholds from the highest score down: #{positives:,
+    // negatives:, steps: [[threshold, truePositives, falsePositives], ...]}
+    _sweep(scores, targets) {
+        s = _seq(scores)
+        t = _seq(targets)
+        (s size != t size) ifTrue { raise("Plot: scores and targets must be the same length") }
+        pos = []
+        neg = []
+        s size times { |i|
+            y = t at(i)
+            ((y == true) || ((y type == "Number") && (y > 0.5))) ifTrue { pos append(s at(i)) } ifFalse { neg append(s at(i)) }
+        }
+        ((pos size == 0) || (neg size == 0)) ifTrue { raise("Plot: ROC and precision-recall need both positive and negative targets") }
+        ps = _descending(pos)
+        ns = _descending(neg)
+        i = 0
+        j = 0
+        steps = []
+        { (i < ps size) || (j < ns size) } whileTrue {
+            a = (i < ps size) ifTrue { ps at(i) } ifFalse { nil }
+            b = (j < ns size) ifTrue { ns at(j) } ifFalse { nil }
+            th = a
+            ((th == nil) || ((b != nil) && (b > th))) ifTrue { th = b }
+            { (i < ps size) && (ps at(i) == th) } whileTrue { i = i + 1 }
+            { (j < ns size) && (ns at(j) == th) } whileTrue { j = j + 1 }
+            steps append([th, i, j])
+        }
+        #{positives: ps size, negatives: ns size, steps: steps}
+    }
+
+    // Numbers from largest to smallest. (Array sort in Clay 0.3.5 compares
+    // anything but two integers as text, so 2e-05 sorts after 0.5; this is a
+    // merge sort that compares numbers.)
+    _descending(values) {
+        n = values size
+        a = values
+        width = 1
+        { width < n } whileTrue {
+            out = []
+            lo = 0
+            { lo < n } whileTrue {
+                mid = Math min(lo + width, n)
+                hi = Math min(lo + (width * 2), n)
+                i = lo
+                j = mid
+                { (i < mid) && (j < hi) } whileTrue {
+                    (a at(i) >= a at(j)) ifTrue { out append(a at(i)); i = i + 1 } ifFalse { out append(a at(j)); j = j + 1 }
+                }
+                { i < mid } whileTrue { out append(a at(i)); i = i + 1 }
+                { j < hi } whileTrue { out append(a at(j)); j = j + 1 }
+                lo = hi
+            }
+            a = out
+            width = width * 2
+        }
+        a
+    }
+
+    // ---- grids of images --------------------------------------------------
+
+    // A figure of images, one per axes: images are rows, flat Arrays (with
+    // shape, or square) or Images. opts: cols, shape, cmap ("gray"), vmin,
+    // vmax, symmetric (true: a range centred on 0 shared by all, for
+    // weights and filters, with "coolwarm"), titles, predicted and actual
+    // (titles "3", or "3 (7)" in red when wrong), labels (class names for
+    // those), title (above all), size (inches per image)
+    imageGrid(images, opts) {
+        items = _seq(images)
+        n = items size
+        (n == 0) ifTrue { raise("Plot: imageGrid needs images") }
+        cols = opts get("cols")
+        (cols == nil) ifTrue { cols = Math min(n, 10) }
+        rows = (n + cols - 1) / cols
+        size = opts get("size") ?? 1.2
+        fig = Plot figure(#{figsize: [Math max(2, cols * size), Math max(1.5, (rows * size * 1.15) + 0.3)],
+                            dpi: opts get("dpi") ?? Plot rc get("figure.dpi")})
+        axs = fig subplots(rows, cols)
+        flat = fig axes
+        Plot sca(flat first)
+        lo = opts get("vmin")
+        hi = opts get("vmax")
+        cmap = opts get("cmap") ?? "gray"
+        (opts get("symmetric") == true) ifTrue {
+            m = 0
+            items each { |img| m = Math max(m, (_flat(img) map { |v| v abs }) max) }
+            lo = 0 - m
+            hi = m
+            cmap = opts get("cmap") ?? "coolwarm"
+        }
+        titles = opts get("titles")
+        pred = opts get("predicted")
+        actual = opts get("actual")
+        names = opts get("labels")
+        flat size times { |i|
+            ax = flat at(i)
+            ax axis("off")
+            (i < n) ifTrue {
+                o = #{cmap: cmap}
+                (opts get("shape") != nil) ifTrue { o set("shape", opts get("shape")) }
+                (lo != nil) ifTrue { o set("vmin", lo) }
+                (hi != nil) ifTrue { o set("vmax", hi) }
+                ax imshow(items at(i), o)
+                (titles != nil) ifTrue { ax title(titles at(i) toString, #{fontsize: 9}) }
+                (pred != nil) ifTrue {
+                    p = _className(pred at(i), names)
+                    ok = (actual == nil) || (argmax(pred at(i)) == argmax(actual at(i)))
+                    label = ok ifTrue { p } ifFalse { p + " (" + _className(actual at(i), names) + ")" }
+                    ax title(label, #{fontsize: 9, color: ok ifTrue { "k" } ifFalse { "C3" }})
+                }
+            }
+        }
+        (opts get("title") != nil) ifTrue { fig suptitle(opts get("title")) }
+        fig
+    }
+
+    // A class number from a number, or the index of the largest entry of a
+    // row of scores or one-hot targets
+    argmax(v) {
+        (v type == "Array") ifFalse { return v }
+        best = 0
+        v size times { |i| (v at(i) > v at(best)) ifTrue { best = i } }
+        best
+    }
+
+    _className(v, names) {
+        c = argmax(v)
+        (names == nil) ifTrue { return c toString }
+        names at(c) toString
+    }
+
+    _flat(img) {
+        (img hasMethod("floats")) ifTrue { return img floats }
+        d = _seq(img)
+        ((d size > 0) && (d first type == "Array")) ifTrue { return d flatten filter { |v| (v != nil) && (v type == "Number") } }
+        d filter { |v| (v != nil) && (v type == "Number") }
+    }
+
+    _seq(v) {
+        (v type == "Array") ifTrue { return v }
+        (v hasMethod("toArray")) ifTrue { return v toArray }
+        raise("Plot: expected an Array, got " + v type)
+    }
+}
