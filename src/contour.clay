@@ -1,0 +1,280 @@
+// PlotContour -- the geometry of contour plots, worked out once in data units
+//
+//   g = PlotContour grid(nil, nil, [[0, 1], [1, 2]])   // #{xs:, ys:, zs:, nr:, nc:}
+//   PlotContour lines(g, 1.0)          // polylines where z = 1: [[[x, y], ...], ...]
+//   PlotContour bands(g, levels)       // per band, polygons where levels(b) <= z < levels(b + 1)
+//
+// Each grid cell is cut into two triangles (corner (i, j) to (i + 1, j + 1)),
+// and z is taken as linear across each triangle, so a cell never has the two
+// readings marching squares must choose between, and the filled bands meet
+// the lines exactly. Cells with a nil or nan corner are left out.
+
+PlotContour = Object clone {
+    // The grid: Z as rows (Z at(i) at(j) is at y i, x j), and X and Y as
+    // nil (the column and row numbers), one Array (one x per column, one y
+    // per row) or rows like Z's (a mesh grid)
+    grid(x, y, z) {
+        rows = z
+        nr = rows size
+        (nr < 2) ifTrue { raise("Plot: contour needs Z as rows of numbers, at least 2 x 2") }
+        nc = rows first size
+        ((nc < 2) || ((rows find { |r| (r type != "Array") || (r size != nc) }) != nil)) ifTrue {
+            raise("Plot: contour needs Z as rows of numbers, all the same length, at least 2 x 2")
+        }
+        xs = _coords(x, nr, nc, false, "X")
+        ys = _coords(y, nr, nc, true, "Y")
+        nan = 0.0 / 0.0
+        zs = rows map { |r| r map { |v| ((v != nil) && (v type == "Number") && (v == v)) ifTrue { v } ifFalse { nan } } }
+        #{xs: xs, ys: ys, zs: zs, nr: nr, nc: nc}
+    }
+
+    // Rows of x (or y) for every grid point
+    _coords(v, nr, nc, isY, name) {
+        (v == nil) ifTrue { return (0..(nr - 1)) map { |i| (0..(nc - 1)) map { |j| isY ifTrue { i } ifFalse { j } } } }
+        a = (v type == "Range") ifTrue { v toArray } ifFalse { v }
+        ((a size > 0) && (a first type == "Array")) ifTrue {
+            ((a size != nr) || ((a find { |r| r size != nc }) != nil)) ifTrue { raise("Plot: contour: " + name + " must have Z's shape, " + nr toString + " x " + nc toString) }
+            return a
+        }
+        want = isY ifTrue { nr } ifFalse { nc }
+        (a size != want) ifTrue { raise("Plot: contour: " + name + " needs " + want toString + " values (one per " + (isY ifTrue { "row" } ifFalse { "column" }) + " of Z), not " + a size toString) }
+        (0..(nr - 1)) map { |i| isY ifTrue { (0..(nc - 1)) map { |j| a at(i) } } ifFalse { a } }
+    }
+
+    // The smallest and largest z (nil when there are none)
+    range(g) {
+        lo = nil
+        hi = nil
+        g get("zs") each { |r| r each { |v| (v == v) ifTrue {
+            ((lo == nil) || (v < lo)) ifTrue { lo = v }
+            ((hi == nil) || (v > hi)) ifTrue { hi = v }
+        } } }
+        [lo, hi]
+    }
+
+    // Levels: a list as it is, or about n (7) nicely rounded ones. Line
+    // contours keep those strictly inside the data's range; filled ones get
+    // one more step at either end so the bands cover all of it.
+    levels(g, spec, filled) {
+        ((spec != nil) && (spec type != "Number")) ifTrue {
+            l = (spec type == "Range") ifTrue { spec toArray } ifFalse { spec }
+            return l sort
+        }
+        [lo, hi] = range(g)
+        (lo == nil) ifTrue { return [] }
+        (lo == hi) ifTrue { return filled ifTrue { [lo - 0.5, hi + 0.5] } ifFalse { [lo] } }
+        // n levels means n + 1 intervals at most, as matplotlib's MaxNLocator(N + 1)
+        t = PlotTicks locate(lo, hi, (spec ?? 7) + 1)
+        v = t get("values")
+        step = t get("step")
+        filled ifFalse { return v filter { |l| (l > lo) && (l < hi) } }
+        ((v size == 0) || (v first > lo)) ifTrue { v = [((v size > 0) ifTrue { v first } ifFalse { hi }) - step] + v }
+        (v last < hi) ifTrue { v = v + [v last + step] }
+        v
+    }
+
+    // A cell's two triangles as corner [i, j] triples
+    _tris(i, j) {
+        [[[i, j], [i, j + 1], [i + 1, j + 1]], [[i, j], [i + 1, j + 1], [i + 1, j]]]
+    }
+
+    // [smallest, largest] z at a cell's corners; nil when one is missing
+    _cellRange(zs, i, j) {
+        a = zs at(i) at(j)
+        b = zs at(i) at(j + 1)
+        c = zs at(i + 1) at(j + 1)
+        d = zs at(i + 1) at(j)
+        ((a != a) || (b != b) || (c != c) || (d != d)) ifTrue { return nil }
+        [Math min(Math min(a, b), Math min(c, d)), Math max(Math max(a, b), Math max(c, d))]
+    }
+
+    // Polylines (Arrays of [x, y]) where z crosses level
+    lines(g, level) {
+        xs = g get("xs")
+        ys = g get("ys")
+        zs = g get("zs")
+        nc = g get("nc")
+        segs = []
+        ends = Dict clone        // grid edge -> the segments ending on it
+        (g get("nr") - 1) times { |i|
+            (nc - 1) times { |j|
+                r = _cellRange(zs, i, j)
+                ((r != nil) && (r at(0) < level) && (r at(1) >= level)) ifTrue {
+                    _tris(i, j) each { |t|
+                        cross = []
+                        3 times { |k|
+                            a = t at(k)
+                            b = t at((k + 1) % 3)
+                            za = zs at(a at(0)) at(a at(1))
+                            zb = zs at(b at(0)) at(b at(1))
+                            ((za >= level) != (zb >= level)) ifTrue {
+                                f = (level - za) / (zb - za)
+                                xa = xs at(a at(0)) at(a at(1))
+                                ya = ys at(a at(0)) at(a at(1))
+                                p = [xa + (f * (xs at(b at(0)) at(b at(1)) - xa)), ya + (f * (ys at(b at(0)) at(b at(1)) - ya))]
+                                ia = (a at(0) * nc) + a at(1)
+                                ib = (b at(0) * nc) + b at(1)
+                                key = (Math min(ia, ib) toString) + ":" + (Math max(ia, ib) toString)
+                                cross append([key, p])
+                            }
+                        }
+                        (cross size == 2) ifTrue {
+                            n = segs size
+                            segs append(cross)
+                            cross each { |c|
+                                l = ends get(c at(0))
+                                (l == nil) ifTrue { ends set(c at(0), [n]) } ifFalse { l append(n) }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        _chain(segs, ends)
+    }
+
+    // Join segments that share a grid edge into polylines
+    _chain(segs, ends) {
+        used = segs map { |s| false }
+        out = []
+        // the unused segment, other than seg, ending on edge key
+        next = { |key, seg|
+            l = ends get(key) ?? []
+            l find { |k| (k != seg) && (used at(k) not) }
+        }
+        segs size times { |s|
+            (used at(s)) ifFalse {
+                used setAt(s, true)
+                line = [segs at(s) at(0) at(1), segs at(s) at(1) at(1)]
+                // forwards from the second end, then backwards from the first
+                [1, 0] each { |side|
+                    key = segs at(s) at(side) at(0)
+                    seg = s
+                    k = next value(key, seg)
+                    { k != nil } whileTrue {
+                        used setAt(k, true)
+                        c = segs at(k)
+                        far = (c at(0) at(0) == key) ifTrue { c at(1) } ifFalse { c at(0) }
+                        (side == 1) ifTrue { line append(far at(1)) } ifFalse { line = [far at(1)] + line }
+                        key = far at(0)
+                        seg = k
+                        k = next value(key, seg)
+                    }
+                }
+                out append(line)
+            }
+        }
+        out
+    }
+
+    // The band b of a value: levels(b) <= v < levels(b + 1), the top band
+    // taking its upper level too; nil outside them all
+    _band(levels, v) {
+        n = levels size - 1
+        ((v < levels first) || (v > levels last)) ifTrue { return nil }
+        lo = 0
+        hi = n - 1
+        { lo < hi } whileTrue {
+            mid = (lo + hi + 1) / 2
+            (levels at(mid) <= v) ifTrue { lo = mid } ifFalse { hi = mid - 1 }
+        }
+        lo
+    }
+
+    // Filled bands: one Array of polygons (each an Array of [x, y]) per band
+    // between consecutive levels. A run of cells all inside one band along a
+    // row is one polygon; cells a level crosses are cut into triangles and
+    // clipped to each band they reach.
+    bands(g, levels) {
+        xs = g get("xs")
+        ys = g get("ys")
+        zs = g get("zs")
+        nc = g get("nc")
+        nb = levels size - 1
+        (nb < 1) ifTrue { return [] }
+        out = (0..(nb - 1)) map { |b| [] }
+        pt = { |i, j| [xs at(i) at(j), ys at(i) at(j)] }
+        (g get("nr") - 1) times { |i|
+            runBand = nil
+            runStart = 0
+            // close the run of whole cells from runStart up to (not including) j
+            flush = { |j|
+                (runBand != nil) ifTrue {
+                    poly = []
+                    (runStart..j) each { |c| poly append(pt value(i, c)) }
+                    (0..(j - runStart)) each { |k| poly append(pt value(i + 1, j - k)) }
+                    out at(runBand) append(poly)
+                }
+                runBand = nil
+            }
+            (nc - 1) times { |j|
+                r = _cellRange(zs, i, j)
+                whole = nil
+                (r != nil) ifTrue {
+                    b0 = _band(levels, r at(0))
+                    b1 = _band(levels, r at(1))
+                    ((b0 != nil) && (b0 == b1)) ifTrue { whole = b0 }
+                }
+                (whole != runBand) ifTrue {
+                    flush value(j)
+                    (whole != nil) ifTrue { runBand = whole; runStart = j }
+                }
+                // cut up cells a level crosses; cells outside every band have nothing to fill
+                ((whole == nil) && (r != nil) && (r at(1) >= levels first) && (r at(0) <= levels last)) ifTrue {
+                    _clipCell(xs, ys, zs, levels, i, j, r, out)
+                }
+            }
+            flush value(nc - 1)
+        }
+        out
+    }
+
+    // A cell levels cross, as its triangles clipped to each band they reach
+    _clipCell(xs, ys, zs, levels, i, j, r, out) {
+        nb = levels size - 1
+        b0 = _band(levels, Math max(r at(0), levels first)) ?? 0
+        b1 = _band(levels, Math min(r at(1), levels last)) ?? (nb - 1)
+        _tris(i, j) each { |t|
+            tri = t map { |c| [xs at(c at(0)) at(c at(1)), ys at(c at(0)) at(c at(1)), zs at(c at(0)) at(c at(1))] }
+            (b0..b1) each { |b|
+                p = _clip(tri, levels at(b), true)
+                p = _clip(p, levels at(b + 1), false)
+                (p size >= 3) ifTrue { out at(b) append(p map { |v| [v at(0), v at(1)] }) }
+            }
+        }
+    }
+
+    // The part of a polygon of [x, y, z] corners with z >= level (above) or
+    // z <= level, cut where z crosses level
+    _clip(poly, level, above) {
+        out = []
+        n = poly size
+        n times { |k|
+            a = poly at(k)
+            b = poly at((k + 1) % n)
+            ina = above ifTrue { a at(2) >= level } ifFalse { a at(2) <= level }
+            inb = above ifTrue { b at(2) >= level } ifFalse { b at(2) <= level }
+            ina ifTrue { out append(a) }
+            (ina != inb) ifTrue {
+                f = (level - a at(2)) / (b at(2) - a at(2))
+                out append([a at(0) + (f * (b at(0) - a at(0))), a at(1) + (f * (b at(1) - a at(1))), level])
+            }
+        }
+        out
+    }
+
+    // The angle of the direction dx, dy in degrees (Math atan2 is missing
+    // from older Clays: then a close approximation, plenty for turning a label)
+    angle(dx, dy) {
+        (Math hasMethod("atan2")) ifTrue { return (Math atan2(dy, dx) * 180) / Math pi }
+        ((dx == 0) && (dy == 0)) ifTrue { return 0 }
+        ax = dx abs
+        ay = dy abs
+        z = (ax >= ay) ifTrue { ay / ax } ifFalse { ax / ay }
+        a = (z * (Math pi / 4)) + ((0.273 * z) * (1 - z))
+        (ax < ay) ifTrue { a = (Math pi / 2) - a }
+        (dx < 0) ifTrue { a = Math pi - a }
+        (dy < 0) ifTrue { a = 0 - a }
+        (a * 180) / Math pi
+    }
+}

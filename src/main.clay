@@ -17,7 +17,8 @@
 // (plot, scatter, bar, hist, imshow ...) go to the current axes. Figures and
 // axes can also be used directly: PlotFigure, PlotAxes. Colours and
 // colormaps are in PlotColor, tick placement in PlotTicks, the statistics
-// behind box and violin plots in PlotStats, and the backends
+// behind box and violin plots in PlotStats, contour geometry in
+// PlotContour, and the backends
 // are PlotSvg, PlotPng (which draws on the image brick's Canvas) and
 // PlotTerm (text for terminals). PlotML has the machine-learning plots and
 // PlotLive the learning curve drawn as training runs.
@@ -29,6 +30,7 @@ import("image")
 import("color.clay")
 import("ticks.clay")
 import("stats.clay")
+import("contour.clay")
 import("svg.clay")
 import("png.clay")
 import("term.clay")
@@ -130,6 +132,9 @@ Plot = Object clone {
     errorbar(x, y, a = nil, b = nil) { gca errorbar(x, y, a, b) }
     boxplot(data, opts = nil) { gca boxplot(data, opts) }
     violinplot(data, opts = nil) { gca violinplot(data, opts) }
+    contour(a = nil, b = nil, c = nil, d = nil, e = nil) { gca contour(a, b, c, d, e) }
+    contourf(a = nil, b = nil, c = nil, d = nil, e = nil) { gca contourf(a, b, c, d, e) }
+    clabel(cs, opts = nil) { gca clabel(cs, opts) }
     pie(values, opts = nil) { gca pie(values, opts) }
     stackplot(x, a = nil, b = nil, c = nil, d = nil, e = nil, f = nil, g = nil, h = nil) { gca stackplot(x, a, b, c, d, e, f, g, h) }
     barLabel(bars, opts = nil) { gca barLabel(bars, opts) }
@@ -143,6 +148,7 @@ Plot = Object clone {
     confusionMatrix(matrix, opts = nil) { gca confusionMatrix(matrix, opts) }
     roc(scores, targets, opts = nil) { gca roc(scores, targets, opts) }
     precisionRecall(scores, targets, opts = nil) { gca precisionRecall(scores, targets, opts) }
+    decisionBoundary(model, inputs, labels = nil, opts = nil) { gca decisionBoundary(model, inputs, labels, opts) }
 
     // A learning curve drawn in the terminal as training runs: pass it as
     // clay-ann fit's onEpoch. See PlotLive for the options.

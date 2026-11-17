@@ -1,10 +1,12 @@
 // PlotML -- plots for machine learning: learning curves, confusion
-// matrices, ROC and precision-recall curves, grids of images
+// matrices, ROC and precision-recall curves, grids of images, decision
+// boundaries
 //
 //   Plot learningCurve(net history)
 //   Plot confusionMatrix(net confusionMatrix(x, y), #{labels: names})
 //   Plot roc(scores, targets)              // returns #{fpr:, tpr:, thresholds:, auc:}
 //   Plot imageGrid(xTest slice(0, 20), #{predicted: p, actual: y})
+//   Plot decisionBoundary(net, points, labels)   // a 2-input classifier's regions
 //
 // They take plain Arrays of numbers, so they work with clay-ann's results
 // without depending on it. The drawing methods are also axes methods
@@ -241,6 +243,115 @@ PlotML = Object clone {
         _unitAxes(ax, opts get("xlabel") ?? "false positive rate", opts get("ylabel") ?? "true positive rate", opts)
         ax legend(#{loc: "lower right"})
         (results size == 1) ifTrue { results first } ifFalse { results }
+    }
+
+    // What a classifier decides across the plane of its two inputs, with the
+    // data on top. model is a network (anything with predictBatch(rows), as
+    // clay-ann's), or a block from a row [x, y] to its outputs or its class.
+    // One output is the probability of class 1: shaded red (0) to blue (1)
+    // with a line where it is 0.5. Several outputs are classes, the largest
+    // winning, each in its own colour. labels (optional): a class per row,
+    // or one-hot rows. Options: resolution (points a side, 100), margin (a
+    // fraction of the data's span, 0.1), cmap (one output, "RdBu"),
+    // classNames (for a legend), s (marker area, 25). Returns the contourf
+    // artist (with several classes, an Array of one per class).
+    decisionBoundary(ax, model, inputs, labels, opts) {
+        rows = ax _seq(inputs)
+        (rows size == 0) ifTrue { raise("Plot: decisionBoundary needs input rows") }
+        ((rows find { |r| (r type != "Array") || (r size != 2) }) != nil) ifTrue {
+            raise("Plot: decisionBoundary needs rows of two inputs, [x, y], to draw on a plane")
+        }
+        xs = rows map { |r| r at(0) }
+        ys = rows map { |r| r at(1) }
+        n = Math max(opts get("resolution") ?? 100, 2)
+        m = opts get("margin") ?? 0.1
+        gx = _span(xs min, xs max, m, n)
+        gy = _span(ys min, ys max, m, n)
+        pts = []
+        n times { |i| n times { |j| pts append([gx at(j), gy at(i)]) } }
+        out = _predict(model, pts)
+        // one output, or several (classes); a block may give class numbers
+        first = out first
+        multi = (first type == "Array") && (first size > 1)
+        nums = multi ifTrue { nil } ifFalse { out map { |o| (o type == "Array") ifTrue { o first } ifFalse { o } } }
+        ((nums != nil) && (nums max > 1) && ((nums find { |v| v != Math round(v) }) == nil)) ifTrue { multi = true }
+        grid = { |vals| (0..(n - 1)) map { |i| vals slice(i * n, (i + 1) * n) } }
+        cs = nil
+        pointColor = nil
+        multi ifTrue {
+            // a score per class: the outputs, or one-hot rows for class numbers
+            scores = (nums != nil) ifTrue {
+                k0 = Math round(nums max) + 1
+                nums map { |v| (0..(k0 - 1)) map { |c| (c == Math round(v)) ifTrue { 1 } ifFalse { 0 } } }
+            } ifFalse { out }
+            k = scores first size
+            // Each class's region is where its margin over the best other
+            // class is positive. Filling those (rather than bands of class
+            // numbers) gives smooth borders, with no sliver of a class
+            // whose number lies between two neighbours'.
+            cs = (0..(k - 1)) map { |c|
+                margin = scores map { |s|
+                    best = nil
+                    k times { |j| ((j != c) && ((best == nil) || (s at(j) > best))) ifTrue { best = s at(j) } }
+                    s at(c) - best
+                }
+                top = Math max(margin max, 0) + 1
+                ax contourf(gx, gy, grid value(margin), [0, top], #{colors: [_light(PlotColor cycleColor(c), 0.6)]})
+            }
+            pointColor = { |c| PlotColor cycleColor(c) }
+        } ifFalse {
+            cmap = opts get("cmap") ?? "RdBu"
+            lv = (0..10) map { |i| i / 10.0 }
+            cs = ax contourf(gx, gy, grid value(nums), lv,
+                             #{colors: (0..9) map { |i| _light(PlotColor toHex(PlotColor colormap(cmap, (i + 0.5) / 10.0)), 0.45) }})
+            ax contour(gx, gy, grid value(nums), [0.5], #{colors: "k", linewidths: 1})
+            pointColor = { |c| PlotColor toHex(PlotColor colormap(cmap, (c == 0) ifTrue { 0.1 } ifFalse { 0.9 })) }
+        }
+        names = opts get("classNames")
+        (labels != nil) ifTrue {
+            lab = ax _seq(labels) map { |l|
+                (l type == "Array") ifTrue { (l size == 1) ifTrue { Math round(l first) } ifFalse { argmax(l) } } ifFalse { Math round(l) }
+            }
+            (lab size != rows size) ifTrue { raise("Plot: decisionBoundary: " + rows size toString + " rows but " + lab size toString + " labels") }
+            (lab max + 1) times { |c|
+                idx = (0..(lab size - 1)) filter { |i| lab at(i) == c }
+                (idx size > 0) ifTrue {
+                    name = (names != nil) ifTrue { (names at(c) ?? c) toString } ifFalse { "class " + c toString }
+                    ax scatter(idx map { |i| xs at(i) }, idx map { |i| ys at(i) },
+                               #{color: pointColor value(c), edgecolors: "k", s: opts get("s") ?? 25, label: name})
+                }
+            }
+            (names != nil) ifTrue { ax legend }
+        } ifFalse {
+            ax scatter(xs, ys, #{color: "k", s: opts get("s") ?? 25})
+        }
+        cs
+    }
+
+    // n points from lo to hi, widened by margin times the span at each end
+    _span(lo, hi, margin, n) {
+        d = (hi - lo) toFloat
+        (d == 0) ifTrue { d = 1.0 }
+        a = lo - (d * margin)
+        b = hi + (d * margin)
+        (0..(n - 1)) map { |i| a + (((b - a) * i) / (n - 1)) }
+    }
+
+    // A model's outputs for rows: predictBatch, predict, or a block
+    _predict(model, rows) {
+        (model type == "Block") ifTrue { return rows map { |r| model value(r) } }
+        (model hasMethod("predictBatch")) ifTrue {
+            out = model predictBatch(rows)
+            return (out type == "Array") ifTrue { out } ifFalse { out toArray }
+        }
+        (model hasMethod("predict")) ifTrue { return rows map { |r| model predict(r) } }
+        raise("Plot: decisionBoundary needs a model with predictBatch or predict, or a block")
+    }
+
+    // A colour mixed with white: f of the way to white
+    _light(c, f) {
+        rgb = PlotColor rgb(c)
+        PlotColor toHex((0..2) map { |i| Math round(rgb at(i) + ((255 - rgb at(i)) * f)) })
     }
 
     precisionRecall(ax, scores, targets, opts) {

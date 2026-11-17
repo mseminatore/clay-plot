@@ -61,6 +61,8 @@ fig savefig("subplots.svg")
 | `ax2 = ax.twinx()` | `ax2 = ax twinx` |
 | `plt.boxplot([a, b], tick_labels=["a", "b"], patch_artist=True)` | `Plot boxplot([a, b], #{labels: ["a", "b"], patchArtist: true})` |
 | `plt.violinplot([a, b], showmedians=True)` | `Plot violinplot([a, b], #{showmedians: true})` |
+| `cs = plt.contour(X, Y, Z, 10, colors="k")`, `plt.clabel(cs)` | `cs = Plot contour(X, Y, Z, 10, #{colors: "k"})`, `Plot clabel(cs)` |
+| `plt.contourf(X, Y, Z, cmap="RdBu")`, `plt.colorbar()` | `Plot contourf(X, Y, Z, #{cmap: "RdBu"})`, `Plot colorbar` |
 | `plt.rcParams["font.size"] = 12` | `Plot rc set("font.size", 12)` |
 | `plt.savefig("f.png", dpi=150)`, `plt.show()`, `plt.close()` | `Plot savefig("f.png", #{dpi: 150})`, `Plot show`, `Plot close` |
 
@@ -94,6 +96,9 @@ return the artist they add, a Dict (`line get("color")`, `line set("label", "new
 | `stackplot(xs, [ys1, ys2, ...], opts)` | Stacked areas, bottom first (the series may also be separate arguments). `labels`, `colors`, `alpha`, `edgecolor`, `baseline` (`"zero"` or `"sym"`). Returns the areas. |
 | `boxplot(data, opts)` | Box plots of one data set (an Array of numbers), several (an Array of Arrays) or named ones (a Dict; its keys label the boxes). Boxes run from the first to the third quartile (numpy's quantiles) with a line at the median; whiskers reach the furthest data within `whis` box lengths (1.5), or `whis: [5, 95]` percentiles, and points beyond are fliers. Options: `positions`, `widths` (0.5), `labels`, `orientation` (`"vertical"` or `"horizontal"`; `vert: false` works too), `notch`, `showmeans`, `showfliers`, `showcaps`, `showbox`, `sym` (`""` hides fliers), `patchArtist` (filled boxes), `colors` (a fill per box), `label`, and matplotlib's `boxprops`, `medianprops`, `whiskerprops`, `capprops`, `flierprops`, `meanprops`. Returns the artist; `get("stats")` has each box's numbers. |
 | `violinplot(data, opts)` | The shape of each data set's distribution (a Gaussian kernel density estimate), mirrored about its position. Data as for `boxplot`. Options: `positions`, `widths` (0.5), `labels`, `orientation`, `showextrema` (true), `showmeans`, `showmedians`, `quantiles` (`[0.25, 0.75]` for every set, or one list per set), `points` (100), `bwMethod` (`"scott"`, `"silverman"` or a number), `color`, `colors`, `alpha` (0.3), `label`. |
+| `contour(Z)`, `contour(X, Y, Z, levels, opts)` | Contour lines of `Z`, rows of numbers (`Z at(i) at(j)` is at row `i`, column `j`; row 0 at the bottom). `X` and `Y` place the columns and rows: one value per column / row, or rows like `Z`'s (a mesh grid); without them columns and rows are at 0, 1, 2, ... `levels` is about how many (7) or a list. Options: `levels`, `colors` (one for every line, which dashes the negative levels, or one per level), `cmap`, `linewidths`, `linestyles`, `alpha`, `label`. `nil` and `nan` cells are left out. Returns the artist, for `clabel` and `colorbar`. |
+| `contourf(...)` | Filled contours, bands of colour between the levels; arguments as `contour`'s. Given a number of levels, the bands cover all the data. `colors` (one per band), `cmap`, `alpha`, `label`. `colorbar` shows the bands, ticked at the levels. |
+| `clabel(cs, opts)` | Write each level on its contour lines, turned to follow them, in a gap cut for the text. `fmt` (`"%.1f"`, `"{:.0f}"` or a block), `fontsize`, `colors`, `inline` (true). Lines too short for their label stay unlabelled. |
 | `barLabel(bars, opts)` | Write values on the bars `bar`, `barh` or `hist` returned. `fmt` (`"%g"`, `"%d%%"`, `"{:,.0f}"`, or a block), `labels` (your own text instead), `labelType` (`"edge"` or `"center"`), `padding` (points), `fontsize`, `color`. |
 | `colorbar(artist, opts)` | A colour bar beside the axes for an image or a colour-mapped scatter (the last one if you leave the artist out). `label`. |
 
@@ -192,9 +197,10 @@ trained on Fashion-MNIST with clay-ann.
 | `confusionMatrix(matrix, opts)` | A confusion matrix (rows: actual class) as a heatmap with its values in the cells, in black or white to stand out. `labels` (class names), `normalize` (`"true"`: each row sums to 1, `"pred"`: columns, `"all"`), `cmap` (`"Blues"`), `colorbar` (`true`), `annotate` (`true` up to 30 classes), `rotation` (of the x labels), `title`. |
 | `roc(scores, targets, opts)` | ROC curves with their AUC. `scores` are numbers (higher: more likely positive) with targets 1/0 or true/false, or rows of class scores (one curve per class, one against the rest) with targets as class numbers or one-hot rows. `labels`, `label`, `chance` (`true`: the diagonal), `title`. Returns the curve, `#{fpr:, tpr:, thresholds:, auc:}`, or one per class. |
 | `precisionRecall(scores, targets, opts)` | Precision-recall curves with their average precision, the same way. Returns `#{precision:, recall:, thresholds:, ap:}` (or one per class). |
+| `decisionBoundary(model, inputs, labels, opts)` | What a classifier decides across the plane of its two inputs, with the data on top. `model` is a clay-ann network (anything with `predictBatch`), or a block from a row `[x, y]` to its outputs or class. With one output (a probability), the plane is shaded red to blue with a line at 0.5; with several, each class's region is filled in its colour. `labels` (optional): a class per row, or one-hot rows. Options: `resolution` (100 points a side), `margin` (0.1 of the data's span), `cmap` (`"RdBu"`), `classNames` (adds a legend), `s` (marker area). |
 | `Plot imageGrid(images, opts)` | A new figure of images, one per axes: rows, flat Arrays or `Image`s. `cols` (up to 10), `shape`, `cmap` (`"gray"`), `vmin`, `vmax`, `symmetric` (`true`: one range centred on 0 for all, with `"coolwarm"`, for weights and filters), `titles`, `predicted` and `actual` (class numbers or rows of scores: titled with the prediction, and the actual class in red when wrong), `labels` (class names), `title`, `size` (inches per image). Returns the figure. |
 
-The first four are axes methods too (`ax roc(...)`). `PlotML rocCurve(scores, targets)`,
+All but `imageGrid` are axes methods too (`ax roc(...)`). `PlotML rocCurve(scores, targets)`,
 `PlotML prCurve(scores, targets)` and `PlotML confusion(actual, predicted)` compute without
 drawing, and `PlotML argmax(row)` is the class a row of scores picks.
 
@@ -213,6 +219,13 @@ Plot confusionMatrix(net confusionMatrix(xTest, yTest), #{labels: names, normali
 ```
 
 ![A confusion matrix](docs/images/fashion_mnist_confusion.png)
+
+```clay
+net train(points, targets)                     // two inputs per row
+Plot decisionBoundary(net, points, targets)    // targets: classes, or one-hot rows
+```
+
+![Decision boundaries of two clay-ann networks](docs/images/decision_boundary.png)
 
 ```clay
 probs = (net predictBatch(xTest)) toArray      // a row of 10 probabilities per image
@@ -301,7 +314,7 @@ fonts do not).
   another sans-serif, which may sit a little closer or further than intended.
 - In SVG, images are embedded as base64 PNG, about a third larger than the PNG itself (a
   128 x 400 spectrogram is about 200 KB).
-- No contour plots, date axes, symlog scales or 3-D yet. Log axes label only powers of ten (and 1, 2, 5 when less than two decades show).
+- No date axes, symlog scales or 3-D yet. Log axes label only powers of ten (and 1, 2, 5 when less than two decades show).
 
 ## Install
 

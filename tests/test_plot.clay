@@ -254,6 +254,88 @@ Test describe("Dashboard charts") {
     }
 }
 
+Test describe("Contours") {
+    // a cone on a 5 x 5 grid: z is the distance from the centre
+    cone = (0..4) map { |i| (0..4) map { |j| Math sqrt(((i - 2) * (i - 2)) + ((j - 2) * (j - 2))) } }
+    area = { |poly|
+        s = 0.0
+        poly size times { |k|
+            a = poly at(k)
+            b = poly at((k + 1) % poly size)
+            s = s + ((a at(0) * b at(1)) - (b at(0) * a at(1)))
+        }
+        s abs / 2
+    }
+    Test it("chooses levels as matplotlib does") {
+        g = PlotContour grid(nil, nil, cone)
+        Test assertEqual(PlotContour levels(g, nil, false), [0.5, 1, 1.5, 2, 2.5])
+        Test assertEqual(PlotContour levels(g, nil, true), [0, 0.5, 1, 1.5, 2, 2.5, 3])
+        Test assertEqual(PlotContour levels(g, [2, 1], false), [1, 2])
+    }
+    Test it("joins contour lines into closed rings") {
+        g = PlotContour grid(nil, nil, cone)
+        ring = PlotContour lines(g, 1.5)
+        Test assertEqual(ring size, 1)
+        Test assertEqual(ring first first, ring first last)
+        // every point is at z = 1.5 along the grid lines it crosses
+        Test assertEqual(PlotContour lines(g, 10) size, 0)
+    }
+    Test it("fills bands that tile the grid exactly") {
+        g = PlotContour grid([0, 1, 2, 3, 4], [10, 11, 12, 13, 14], cone)
+        bands = PlotContour bands(g, [0, 1, 2, 3])
+        total = bands reduce(0.0) { |s, b| s + (b reduce(0.0) { |t, p| t + area value(p) }) }
+        Test assertEqual(Math round(total * 1000), 16000)     // the 4 x 4 grid, no gaps or overlaps
+        Test assertEqual(bands first first first at(1) >= 10, true)
+        // a band the data never reaches is empty
+        Test assertEqual(PlotContour bands(g, [5, 6]) first size, 0)
+    }
+    Test it("draws contour lines and labels them") {
+        Plot close
+        z = (0..9) map { |i| (0..9) map { |j| (i - 4.5) * (j - 4.5) } }
+        cs = Plot contour(z, #{colors: "k"})
+        Test assertEqual(cs get("kind"), "contour")
+        Test assertEqual(cs get("levels") size > 3, true)
+        Plot clabel(cs, #{fmt: "%.0f"})
+        [lo, hi] = Plot xlim
+        Test assertEqual([lo, hi], [0, 9])                    // contours fill the axes
+        svg = Plot toSvg
+        Test assertTrue(svg contains("stroke-dasharray"))      // negative levels dashed
+        Test assertTrue(svg contains(">10</text>"))
+        Test assertRaises({ Plot clabel(Plot contourf(z)) })
+        Test assertRaises({ Plot contour([[1, 2]]) })
+        Test assertRaises({ Plot contour([0, 1], [0, 1, 2], [[1, 2], [3, 4]]) })
+        Plot close
+    }
+    Test it("fills contours, with a banded colour bar") {
+        Plot close
+        cf = Plot contourf([0, 1, 2], [0, 10], [[0, 1, 2], [3, 4, 5]], [0, 2, 4, 6], #{cmap: "viridis"})
+        Test assertEqual(cf get("colors") size, 3)
+        Test assertEqual(Plot ylim, [0, 10])
+        Plot colorbar
+        svg = Plot toSvg
+        Test assertTrue(svg contains(">4</text>"))             // the colour bar is ticked at the levels
+        Test assertTrue(svg contains("<polygon"))
+        Plot close
+    }
+    Test it("shows a classifier's decisions") {
+        Plot close
+        pts = [[0, 0], [1, 0], [0, 1], [3, 3], [4, 3], [3, 4]]
+        cs = Plot decisionBoundary({ |r| (r at(0) + r at(1) > 3) ifTrue { 0.9 } ifFalse { 0.1 } }, pts, [0, 0, 0, 1, 1, 1],
+                                   #{resolution: 20, classNames: ["a", "b"]})
+        Test assertEqual(cs get("kind"), "contourf")
+        Test assertEqual((Plot gca artists filter { |a| a get("kind") == "contour" }) size, 1)   // the 0.5 line
+        Test assertTrue(Plot toSvg contains(">b</text>"))
+        Plot close
+        net = Object clone {
+            predictBatch(rows) { rows map { |r| [0 - r at(0), r at(0) - 2, r at(1) - 2] } }
+        }
+        three = Plot decisionBoundary(net, pts, [[1, 0, 0], [0, 1, 0], [0, 0, 1], [0, 1, 0], [0, 1, 0], [0, 0, 1]], #{resolution: 20})
+        Test assertEqual(three size, 3)
+        Test assertRaises({ Plot decisionBoundary(net, [[1, 2, 3]]) })
+        Plot close
+    }
+}
+
 Test describe("Box and violin plots") {
     Test it("works out quartiles as numpy does") {
         Test assertEqual(PlotStats quantile([1, 2, 3, 4], 0.25), 1.75)

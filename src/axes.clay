@@ -297,8 +297,11 @@ PlotAxes = Object clone {
     // unless you pass it): colorbar(artist, #{label:})
     colorbar(art = nil, opts = nil) {
         (art type == "Dict" && art get("kind") == nil) ifTrue { opts = art; art = nil }
-        target = art ?? (artists reverse find { |x| (x get("kind") == "image" && x get("rgb") not) || (x get("values") != nil) })
-        (target == nil) ifTrue { raise("Plot: colorbar needs an image or a scatter with numeric colours (c:) first") }
+        target = art ?? (artists reverse find { |x|
+            k = x get("kind")
+            (k == "image" && x get("rgb") not) || (x get("values") != nil) || (k == "contour") || (k == "contourf")
+        })
+        (target == nil) ifTrue { raise("Plot: colorbar needs an image, a contour or a scatter with numeric colours (c:) first") }
         self colorbarArtist = target
         self colorbarLabel = (opts == nil) ifTrue { nil } ifFalse { opts get("label") }
         target
@@ -582,6 +585,97 @@ PlotAxes = Object clone {
         art
     }
 
+    // Contour lines of Z, rows of numbers (Z at(i) at(j) is at row i, column
+    // j): contour(Z), contour(Z, levels), contour(X, Y, Z), contour(X, Y, Z,
+    // levels), each with an options Dict last. X and Y place the columns and
+    // rows: one value per column / row, or rows like Z's (a mesh grid);
+    // without them, columns are at 0, 1, 2 ... and rows likewise, row 0 at
+    // the bottom. levels: about how many (7), or a list. Options: levels,
+    // colors (one for all, or one per level; with one colour, negative
+    // levels are dashed), cmap (otherwise), linewidths, linestyles, alpha,
+    // label. Returns the artist, for clabel and colorbar.
+    contour(a = nil, b = nil, c = nil, d = nil, e = nil) { _contour(false, [a, b, c, d, e]) }
+
+    // Filled contours: bands of colour between the levels; arguments as
+    // contour's. With a number of levels, the bands cover all the data.
+    // Options: levels, colors (one per band), cmap, alpha, label.
+    contourf(a = nil, b = nil, c = nil, d = nil, e = nil) { _contour(true, [a, b, c, d, e]) }
+
+    // Write each contour line's level on it, in a gap in the line:
+    // clabel(cs, #{fmt: "%.1f", fontsize:, colors:, inline: true})
+    clabel(cs, opts = nil) {
+        ((cs type != "Dict") || (cs get("kind") != "contour")) ifTrue { raise("Plot: clabel needs what contour returned (contourf has no lines to label)") }
+        o = opts ?? #{}
+        cs set("clabel", #{fmt: o get("fmt"), fontsize: o get("fontsize") ?? _rc("font.size"), inline: o get("inline") ?? true,
+                           color: (o get("colors") == nil) ifTrue { nil } ifFalse { PlotColor hex(o get("colors")) }})
+        cs
+    }
+
+    _contour(filled, args) {
+        who = filled ifTrue { "contourf" } ifFalse { "contour" }
+        items = args filter { |v| v != nil }
+        opts = #{}
+        ((items size > 0) && (items last type == "Dict")) ifTrue { opts = items last; items = items slice(0, items size - 1) }
+        n = items size
+        ((n < 1) || (n > 4)) ifTrue { raise("Plot: " + who + " takes Z, Z and levels, X, Y and Z, or X, Y, Z and levels (then an options Dict)") }
+        z = (n <= 2) ifTrue { items at(0) } ifFalse { items at(2) }
+        spec = (n == 2) ifTrue { items at(1) } ifFalse { (n == 4) ifTrue { items at(3) } ifFalse { nil } }
+        spec = spec ?? opts get("levels")
+        g = PlotContour grid((n >= 3) ifTrue { _seqOrRows(items at(0)) } ifFalse { nil },
+                             (n >= 3) ifTrue { _seqOrRows(items at(1)) } ifFalse { nil },
+                             _grid(z, opts get("shape")))
+        levels = PlotContour levels(g, spec, filled)
+        (filled && (levels size < 2)) ifTrue { raise("Plot: contourf needs at least two levels") }
+        // where each level (or band) falls on the colormap
+        lo = (levels size > 0) ifTrue { levels first } ifFalse { 0 }
+        hi = (levels size > 0) ifTrue { levels last } ifFalse { 1 }
+        marks = filled ifTrue { (0..(levels size - 2)) map { |k| (levels at(k) + levels at(k + 1)) / 2.0 } } ifFalse { levels }
+        cmap = opts get("cmap") ?? _rc("image.cmap")
+        given = opts get("colors")
+        colors = []
+        marks size times { |k|
+            v = marks at(k)
+            (given != nil) ifTrue {
+                colors append((given type == "Array") ifTrue { PlotColor hex(given at(k % given size)) } ifFalse { PlotColor hex(given) })
+            } ifFalse {
+                colors append(PlotColor toHex(PlotColor colormap(cmap, (hi == lo) ifTrue { 0.5 } ifFalse { (v - lo) / (hi - lo) toFloat })))
+            }
+        }
+        xr = _extentOf(g get("xs"))
+        yr = _extentOf(g get("ys"))
+        art = #{kind: who, levels: levels, colors: colors, alpha: opts get("alpha"), cmap: cmap, vmin: lo, vmax: hi,
+                extent: [xr at(0), xr at(1), yr at(0), yr at(1)], label: opts get("label")}
+        art set("color", (colors size > 0) ifTrue { colors at(colors size / 2) } ifFalse { "#000000" })
+        filled ifTrue {
+            art set("polys", PlotContour bands(g, levels))
+        } ifFalse {
+            art set("paths", levels map { |l| PlotContour lines(g, l) })
+            lws = opts get("linewidths") ?? _rc("lines.linewidth")
+            mono = (given != nil) && (given type != "Array")
+            lss = opts get("linestyles") ?? (levels map { |l| (mono && (l < 0)) ifTrue { "--" } ifFalse { "-" } })
+            art set("linewidths", lws)
+            art set("linestyles", lss)
+            art set("linewidth", _nth(lws, 0))
+            art set("linestyle", "-")
+        }
+        artists append(art)
+        art
+    }
+
+    // X or Y for contour: a flat Array, rows, or a Range
+    _seqOrRows(v) { (v type == "Range") ifTrue { v toArray } ifFalse { v } }
+
+    // [smallest, largest] of rows of numbers
+    _extentOf(rows) {
+        lo = nil
+        hi = nil
+        rows each { |r| r each { |v|
+            ((lo == nil) || (v < lo)) ifTrue { lo = v }
+            ((hi == nil) || (v > hi)) ifTrue { hi = v }
+        } }
+        [lo, hi]
+    }
+
     // ---- machine-learning plots (ml.clay) --------------------------------
 
     // Training history: what clay-ann's fit returns (a Dict per epoch), net
@@ -597,6 +691,13 @@ PlotAxes = Object clone {
 
     // Precision-recall curves, with their average precision
     precisionRecall(scores, targets, opts = nil) { PlotML precisionRecall(self, scores, targets, opts ?? #{}) }
+
+    // What a classifier decides across the plane of its two inputs, with
+    // the data on top (see PlotML decisionBoundary)
+    decisionBoundary(model, inputs, labels = nil, opts = nil) {
+        (labels type == "Dict") ifTrue { opts = labels; labels = nil }
+        PlotML decisionBoundary(self, model, inputs, labels, opts ?? #{})
+    }
 
     // ---- twin axes ------------------------------------------------------
 
@@ -913,12 +1014,14 @@ PlotAxes = Object clone {
         (k == "errbar") ifTrue { return _drawErrbar(cv, art) }
         (k == "boxes") ifTrue { return _drawBoxes(cv, art) }
         (k == "violin") ifTrue { return _drawViolins(cv, art) }
+        (k == "contour") ifTrue { return _drawContour(cv, art) }
+        (k == "contourf") ifTrue { return _drawContourf(cv, art) }
         nil
     }
 
     _zorder(art) {
         k = art get("kind")
-        (k == "image") ifTrue { return 0 }
+        (k == "image" || k == "contourf") ifTrue { return 0 }
         (k == "bars" || k == "fill" || k == "wedge" || k == "violin") ifTrue { return 1 }
         (k == "text") ifTrue { return 3 }
         2
@@ -1223,6 +1326,92 @@ PlotAxes = Object clone {
                 b get("quantiles") each { |v| _boxLine(cv, vert, pos - q, v, pos + q, v, lines) }
             }
         }
+    }
+
+    // Filled contours. Each band is many polygons; opaque ones get a hairline
+    // of their own colour, so antialiased edges don't leave seams between them
+    _drawContourf(cv, art) {
+        alpha = art get("alpha")
+        hair = (alpha == nil) || (alpha >= 1)
+        art get("polys") size times { |b|
+            c = art get("colors") at(b)
+            style = hair ifTrue { #{fill: c, stroke: c, width: 1.25, join: "round"} } ifFalse { #{fill: c, alpha: alpha} }
+            art get("polys") at(b) each { |poly|
+                cv polygon(poly map { |p| _px(p at(0)) }, poly map { |p| _py(p at(1)) }, style)
+            }
+        }
+    }
+
+    _drawContour(cv, art) {
+        lab = art get("clabel")
+        levels = art get("levels")
+        levels size times { |k|
+            lw = _pt(_nth(art get("linewidths"), k))
+            style = #{stroke: art get("colors") at(k), width: lw, dash: _dash(_nth(art get("linestyles"), k), lw),
+                      alpha: art get("alpha"), join: "round", cap: "butt"}
+            art get("paths") at(k) each { |line|
+                px = []
+                py = []
+                line each { |p| (_okX(p at(0)) && _okY(p at(1))) ifTrue { px append(_px(p at(0))); py append(_py(p at(1))) } }
+                (px size >= 2) ifTrue {
+                    (lab != nil) ifTrue { _labelledLine(cv, px, py, levels at(k), lab, style) } ifFalse { cv polyline(px, py, style) }
+                }
+            }
+        }
+    }
+
+    // A contour line with its level written halfway along it, turned to
+    // follow the line, in a gap cut for it (inline) or over it. Lines too
+    // short for the text are left unlabelled.
+    _labelledLine(cv, px, py, level, lab, style) {
+        text = (lab get("fmt") != nil) ifTrue { PlotTicks printf(lab get("fmt"), level) } ifFalse { PlotTicks short(level) }
+        fs = _pt(lab get("fontsize"))
+        w = cv measure(text, fs)
+        cum = [0.0]
+        (px size - 1) times { |i|
+            dx = px at(i + 1) - px at(i)
+            dy = py at(i + 1) - py at(i)
+            cum append(cum last + Math sqrt((dx * dx) + (dy * dy)))
+        }
+        total = cum last
+        (total < (w * 2.5)) ifTrue { return cv polyline(px, py, style) }
+        mid = total / 2
+        pad = fs * 0.3
+        g0 = mid - (w / 2) - pad
+        g1 = mid + (w / 2) + pad
+        a = _along(px, py, cum, g0)
+        b = _along(px, py, cum, g1)
+        m = _along(px, py, cum, mid)
+        (lab get("inline")) ifTrue {
+            x1 = []
+            y1 = []
+            x2 = [b at(0)]
+            y2 = [b at(1)]
+            px size times { |i|
+                (cum at(i) < g0) ifTrue { x1 append(px at(i)); y1 append(py at(i)) }
+                (cum at(i) > g1) ifTrue { x2 append(px at(i)); y2 append(py at(i)) }
+            }
+            x1 append(a at(0)); y1 append(a at(1))
+            cv polyline(x1, y1, style)
+            cv polyline(x2, y2, style)
+        } ifFalse {
+            cv polyline(px, py, style)
+        }
+        // pixels run down; angles run anticlockwise. Keep the text upright.
+        rot = PlotContour angle(b at(0) - a at(0), a at(1) - b at(1))
+        (rot > 90) ifTrue { rot = rot - 180 }
+        (rot < -90) ifTrue { rot = rot + 180 }
+        cv text(m at(0), m at(1), text, #{size: fs, anchor: "middle", valign: "center", rotate: rot,
+                                          color: lab get("color") ?? style get("stroke")})
+    }
+
+    // The point at distance s along a polyline (cum: the distance at each point)
+    _along(px, py, cum, s) {
+        i = 0
+        { (i < cum size - 2) && (cum at(i + 1) < s) } whileTrue { i = i + 1 }
+        seg = cum at(i + 1) - cum at(i)
+        f = (seg > 0) ifTrue { ((s - cum at(i)) / seg) clamp(0, 1) } ifFalse { 0 }
+        [px at(i) + (f * (px at(i + 1) - px at(i))), py at(i) + (f * (py at(i + 1) - py at(i)))]
     }
 
     _drawRefLine(cv, art) {
@@ -1572,7 +1761,7 @@ PlotAxes = Object clone {
             hx = lx + pad
             k = a get("kind")
             color = PlotColor hex(a get("color") ?? "#000000")
-            (k == "line" || k == "hline" || k == "vline") ifTrue {
+            (k == "line" || k == "hline" || k == "vline" || k == "contour") ifTrue {
                 ls = a get("linestyle") ?? "-"
                 lw = _pt(a get("linewidth") ?? _rc("lines.linewidth"))
                 ((ls != "none") && (ls != "")) ifTrue {
@@ -1596,6 +1785,9 @@ PlotAxes = Object clone {
             (k == "violin") ifTrue {
                 fill = (a get("colors") != nil) ifTrue { a get("colors") first } ifFalse { a get("color") }
                 cv rect(hx, y - (fs * 0.35), handle, fs * 0.7, #{fill: fill, alpha: a get("alpha")})
+            }
+            (k == "contourf") ifTrue {
+                cv rect(hx, y - (fs * 0.35), handle, fs * 0.7, #{fill: a get("color"), alpha: a get("alpha")})
             }
             (k == "bars" || k == "fill" || k == "wedge") ifTrue {
                 fill = (a get("colors") != nil) ifTrue { a get("colors") first } ifFalse { a get("color") }
@@ -1695,6 +1887,11 @@ PlotAxes = Object clone {
         a = colorbarArtist
         t = PlotTicks locate(a get("vmin"), a get("vmax"), Math max(2, Math min(9, (h / (fs * 2.5)) toInt)))
         self cbt = #{values: t get("values"), labels: PlotTicks labels(t get("values"), t get("decimals"))}
+        // a contour's colour bar is ticked at its levels, when they fit
+        lv = a get("levels")
+        ((lv != nil) && (lv size >= 2) && (lv size <= Math max(2, (h / (fs * 1.6)) toInt))) ifTrue {
+            self cbt = #{values: lv, labels: lv map { |v| PlotTicks short(v) }}
+        }
         widest = cbt get("labels") reduce(0) { |m, s| Math max(m, cv measure(s, fs)) }
         extra = (colorbarLabel != nil) ifTrue { (_pt(_rc("axes.labelsize")) * 1.2) + _pt(4) } ifFalse { 0 }
         _pt(14) + _pt(10) + _pt(3.5) + _pt(3.5) + widest + extra
@@ -1707,8 +1904,19 @@ PlotAxes = Object clone {
         y = b at(1)
         w = _pt(10)
         h = b at(3)
-        // 256 steps of the colormap, highest at the top
-        cv image(x, y, w, h, Image colormap(1, 256, (0..255) map { |i| 255 - i }, PlotColor palette(a get("cmap")), 0, 255))
+        (a get("kind") == "contourf") ifTrue {
+            // one block per band, in the band's colour
+            lv = a get("levels")
+            sp = (lv last - lv first) toFloat
+            (lv size - 1) times { |k|
+                y0 = (y + h) - (((lv at(k + 1) - lv first) / sp) * h)
+                y1 = (y + h) - (((lv at(k) - lv first) / sp) * h)
+                cv rect(x, y0, w, y1 - y0, #{fill: a get("colors") at(k), stroke: a get("colors") at(k), width: 0.75})
+            }
+        } ifFalse {
+            // 256 steps of the colormap, highest at the top
+            cv image(x, y, w, h, Image colormap(1, 256, (0..255) map { |i| 255 - i }, PlotColor palette(a get("cmap")), 0, 255))
+        }
         lw = _pt(_rc("axes.linewidth"))
         cv rect(x, y, w, h, #{stroke: "#000000", width: lw})
         lo = a get("vmin")
@@ -1839,6 +2047,13 @@ PlotAxes = Object clone {
                         useY ifTrue { stickyY append(base) }
                     }
                 }
+            }
+            (k == "contour" || k == "contourf") ifTrue {
+                e = a get("extent")
+                incX value(e at(0)); incX value(e at(1))
+                incY value(e at(2)); incY value(e at(3))
+                useX ifTrue { tight setAt(0, true) }
+                useY ifTrue { tight setAt(1, true) }
             }
             (k == "boxes" || k == "violin") ifTrue {
                 incPos = a get("vert") ifTrue { incX } ifFalse { incY }
