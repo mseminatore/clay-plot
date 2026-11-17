@@ -486,6 +486,102 @@ PlotAxes = Object clone {
         out
     }
 
+    // Box plots: boxplot(values), boxplot([set1, set2, ...]) or
+    // boxplot(#{name: values, ...}) (the names label the boxes). Each box
+    // runs from the first to the third quartile with a line at the median;
+    // whiskers reach the furthest data within whis box lengths (1.5), or
+    // whis: [5, 95] percentiles, and points beyond are drawn as fliers.
+    // Options: positions (1, 2, ...), widths (0.5), labels, orientation
+    // ("vertical" or "horizontal"; or vert: false), notch, showmeans,
+    // showfliers, showcaps, showbox, sym ("" hides fliers; "r+" etc.),
+    // patchArtist (fill the boxes), colors (a fill per box), label, and
+    // boxprops (facecolor, edgecolor, linewidth, linestyle), medianprops,
+    // whiskerprops, capprops (color, linewidth, linestyle), flierprops,
+    // meanprops (marker, markerfacecolor, markeredgecolor, markersize).
+    // Returns the artist; its "stats" are each box's numbers (PlotStats
+    // boxStats: q1, med, q3, whislo, whishi, fliers, mean ...).
+    boxplot(data, opts = nil) {
+        opts = opts ?? #{}
+        [sets, names] = _datasets(data, "boxplot")
+        n = sets size
+        vert = _vertical(opts)
+        positions = _positions(opts, n, "boxplot")
+        stats = sets map { |s| PlotStats boxStats(s, opts get("whis") ?? 1.5) }
+        bp = opts get("boxprops") ?? #{}
+        fill = nil
+        ((opts get("patchArtist") == true) || (bp get("facecolor") != nil)) ifTrue {
+            fill = _hexOrNil(bp get("facecolor") ?? PlotColor cycleColor(0))
+        }
+        colors = opts get("colors")
+        (colors != nil) ifTrue { colors = _seq(colors) map { |c| PlotColor hex(c) } }
+        flier = _markerProps(opts get("flierprops"), "o", nil, "k")
+        showfliers = opts get("showfliers") ?? true
+        sym = opts get("sym")
+        (sym != nil) ifTrue {
+            (sym == "") ifTrue { showfliers = false } ifFalse {
+                f = _parseFmt(sym)
+                flier set("marker", f get("marker") ?? "o")
+                (f get("color") != nil) ifTrue { flier set("edge", PlotColor hex(f get("color"))); flier set("face", PlotColor hex(f get("color"))) }
+            }
+        }
+        green = PlotColor cycleColor(2)
+        art = #{kind: "boxes", vert: vert, positions: positions, widths: opts get("widths") ?? 0.5, stats: stats,
+                notch: opts get("notch") == true, showfliers: showfliers, showmeans: opts get("showmeans") == true,
+                showcaps: opts get("showcaps") ?? true, showbox: opts get("showbox") ?? true,
+                fill: fill, colors: colors,
+                box: _lineProps(bp, "k", 1, bp get("edgecolor")),
+                median: _lineProps(opts get("medianprops"), PlotColor cycleColor(1), 1, nil),
+                whisker: _lineProps(opts get("whiskerprops"), "k", 1, nil),
+                cap: _lineProps(opts get("capprops"), "k", 1, nil),
+                flier: flier, mean: _markerProps(opts get("meanprops"), "^", green, green),
+                label: opts get("label")}
+        art set("color", (colors != nil) ifTrue { colors first } ifFalse { fill })
+        _categoryTicks(vert, positions, opts get("labels") ?? opts get("tickLabels") ?? names)
+        artists append(art)
+        art
+    }
+
+    // Violin plots: the shape of each data set's distribution (a Gaussian
+    // kernel density estimate), mirrored about its position. Data as for
+    // boxplot. Options: positions, widths (0.5), labels, orientation (or
+    // vert: false), showextrema (true), showmeans, showmedians, quantiles
+    // ([0.25, 0.75] for every set, or a list per set), points (100),
+    // bwMethod ("scott", "silverman" or a number), color, colors (one per
+    // violin), alpha (0.3), label. Returns the artist; its "bodies" hold
+    // each violin's coords, density, min, max, mean and median.
+    violinplot(data, opts = nil) {
+        opts = opts ?? #{}
+        [sets, names] = _datasets(data, "violinplot")
+        n = sets size
+        vert = _vertical(opts)
+        positions = _positions(opts, n, "violinplot")
+        qs = opts get("quantiles")
+        bodies = []
+        n times { |i|
+            s = PlotStats clean(sets at(i))
+            k = PlotStats kde(s, opts get("points") ?? 100, opts get("bwMethod") ?? opts get("bw_method"))
+            q = nil
+            (qs != nil) ifTrue {
+                q = ((qs size > 0) && (qs first type == "Array")) ifTrue { qs at(i) ?? [] } ifFalse { qs }
+            }
+            bodies append(#{coords: k get("coords"), density: k get("density"),
+                            min: (s size > 0) ifTrue { s first } ifFalse { nil },
+                            max: (s size > 0) ifTrue { s last } ifFalse { nil },
+                            mean: PlotStats mean(s), median: PlotStats quantile(s, 0.5),
+                            quantiles: (q ?? []) map { |p| PlotStats quantile(s, p) }})
+        }
+        colors = opts get("colors")
+        (colors != nil) ifTrue { colors = _seq(colors) map { |c| PlotColor hex(c) } }
+        color = PlotColor hex(opts get("color") ?? opts get("facecolor") ?? _nextCycle)
+        art = #{kind: "violin", vert: vert, positions: positions, widths: opts get("widths") ?? 0.5,
+                bodies: bodies, color: color, colors: colors, alpha: opts get("alpha") ?? 0.3,
+                showextrema: opts get("showextrema") ?? true, showmeans: opts get("showmeans") == true,
+                showmedians: opts get("showmedians") == true, label: opts get("label")}
+        _categoryTicks(vert, positions, opts get("labels") ?? opts get("tickLabels") ?? names)
+        artists append(art)
+        art
+    }
+
     // ---- machine-learning plots (ml.clay) --------------------------------
 
     // Training history: what clay-ann's fit returns (a Dict per epoch), net
@@ -815,13 +911,15 @@ PlotAxes = Object clone {
         (k == "image") ifTrue { return _drawImage(cv, art) }
         (k == "wedge") ifTrue { return _drawWedge(cv, art) }
         (k == "errbar") ifTrue { return _drawErrbar(cv, art) }
+        (k == "boxes") ifTrue { return _drawBoxes(cv, art) }
+        (k == "violin") ifTrue { return _drawViolins(cv, art) }
         nil
     }
 
     _zorder(art) {
         k = art get("kind")
         (k == "image") ifTrue { return 0 }
-        (k == "bars" || k == "fill" || k == "wedge") ifTrue { return 1 }
+        (k == "bars" || k == "fill" || k == "wedge" || k == "violin") ifTrue { return 1 }
         (k == "text") ifTrue { return 3 }
         2
     }
@@ -1010,6 +1108,119 @@ PlotAxes = Object clone {
                         cv line(x1, y1 - cap, x1, y1 + cap, style)
                     }
                 }
+            }
+        }
+    }
+
+    // A point of a box or violin in pixels: pos along the category axis, v
+    // along the value axis
+    _boxPoint(vert, pos, v) { vert ifTrue { [_px(pos), _py(v)] } ifFalse { [_px(v), _py(pos)] } }
+
+    // A line from (pos0, v0) to (pos1, v1) in box coordinates
+    _boxLine(cv, vert, pos0, v0, pos1, v1, style) {
+        a = _boxPoint(vert, pos0, v0)
+        b = _boxPoint(vert, pos1, v1)
+        cv line(a at(0), a at(1), b at(0), b at(1), style)
+    }
+
+    _drawBoxes(cv, art) {
+        vert = art get("vert")
+        whisker = _strokeOf(art get("whisker"))
+        cap = _strokeOf(art get("cap"))
+        median = _strokeOf(art get("median"))
+        boxStyle = _strokeOf(art get("box"))
+        fl = art get("flier")
+        mn = art get("mean")
+        colors = art get("colors")
+        art get("stats") size times { |i|
+            st = art get("stats") at(i)
+            (st get("n") > 0) ifTrue {
+                pos = art get("positions") at(i)
+                half = _nth(art get("widths"), i) / 2.0
+                q1 = st get("q1")
+                q3 = st get("q3")
+                med = st get("med")
+                _boxLine(cv, vert, pos, q1, pos, st get("whislo"), whisker)
+                _boxLine(cv, vert, pos, q3, pos, st get("whishi"), whisker)
+                art get("showcaps") ifTrue {
+                    _boxLine(cv, vert, pos - (half / 2), st get("whislo"), pos + (half / 2), st get("whislo"), cap)
+                    _boxLine(cv, vert, pos - (half / 2), st get("whishi"), pos + (half / 2), st get("whishi"), cap)
+                }
+                // the box's outline as [offset from pos, value] corners;
+                // a notch narrows it to half its width at the median
+                inner = half
+                shape = [[0 - half, q1], [half, q1], [half, q3], [0 - half, q3]]
+                art get("notch") ifTrue {
+                    inner = half / 2
+                    lo = Math max(st get("cilo"), q1)
+                    hi = Math min(st get("cihi"), q3)
+                    shape = [[0 - half, q1], [half, q1], [half, lo], [inner, med], [half, hi], [half, q3],
+                             [0 - half, q3], [0 - half, hi], [0 - inner, med], [0 - half, lo]]
+                }
+                art get("showbox") ifTrue {
+                    xs = []
+                    ys = []
+                    shape each { |c|
+                        p = _boxPoint(vert, pos + c at(0), c at(1))
+                        xs append(p at(0)); ys append(p at(1))
+                    }
+                    fill = (colors != nil) ifTrue { colors at(i % colors size) } ifFalse { art get("fill") }
+                    style = _copy(boxStyle)
+                    style set("fill", fill)
+                    style set("join", "miter")
+                    cv polygon(xs, ys, style)
+                }
+                _boxLine(cv, vert, pos - inner, med, pos + inner, med, median)
+                art get("showfliers") ifTrue {
+                    ms = _pt(fl get("size"))
+                    st get("fliers") each { |v|
+                        p = _boxPoint(vert, pos, v)
+                        _marker(cv, fl get("marker"), p at(0), p at(1), ms, fl get("face"), fl get("edge") ?? fl get("face"), fl get("alpha"))
+                    }
+                }
+                art get("showmeans") ifTrue {
+                    p = _boxPoint(vert, pos, st get("mean"))
+                    _marker(cv, mn get("marker"), p at(0), p at(1), _pt(mn get("size")), mn get("face"), mn get("edge") ?? mn get("face"), mn get("alpha"))
+                }
+            }
+        }
+    }
+
+    _drawViolins(cv, art) {
+        vert = art get("vert")
+        colors = art get("colors")
+        lines = #{stroke: art get("color"), width: _pt(1), cap: "butt"}
+        art get("bodies") size times { |i|
+            b = art get("bodies") at(i)
+            coords = b get("coords")
+            (coords size > 0) ifTrue {
+                pos = art get("positions") at(i)
+                half = _nth(art get("widths"), i) / 2.0
+                dens = b get("density")
+                top = dens max
+                scale = (top > 0) ifTrue { half / top } ifFalse { 0 }
+                xs = []
+                ys = []
+                coords size times { |j|
+                    p = _boxPoint(vert, pos + (dens at(j) * scale), coords at(j))
+                    xs append(p at(0)); ys append(p at(1))
+                }
+                coords size times { |j|
+                    k = (coords size - 1) - j
+                    p = _boxPoint(vert, pos - (dens at(k) * scale), coords at(k))
+                    xs append(p at(0)); ys append(p at(1))
+                }
+                fill = (colors != nil) ifTrue { colors at(i % colors size) } ifFalse { art get("color") }
+                cv polygon(xs, ys, #{fill: fill, alpha: art get("alpha"), stroke: fill, width: _pt(1)})
+                q = half / 2
+                art get("showextrema") ifTrue {
+                    _boxLine(cv, vert, pos, b get("min"), pos, b get("max"), lines)
+                    _boxLine(cv, vert, pos - q, b get("min"), pos + q, b get("min"), lines)
+                    _boxLine(cv, vert, pos - q, b get("max"), pos + q, b get("max"), lines)
+                }
+                art get("showmedians") ifTrue { _boxLine(cv, vert, pos - q, b get("median"), pos + q, b get("median"), lines) }
+                art get("showmeans") ifTrue { _boxLine(cv, vert, pos - q, b get("mean"), pos + q, b get("mean"), lines) }
+                b get("quantiles") each { |v| _boxLine(cv, vert, pos - q, v, pos + q, v, lines) }
             }
         }
     }
@@ -1379,6 +1590,13 @@ PlotAxes = Object clone {
                 (s type == "Array") ifTrue { s = Math pow(_rc("lines.markersize"), 2) }
                 _marker(cv, a get("marker"), hx + (handle / 2), y, _pt(Math sqrt(s)), c, a get("edgecolor") ?? c, a get("alpha"))
             }
+            (k == "boxes") ifTrue {
+                cv rect(hx, y - (fs * 0.35), handle, fs * 0.7, #{fill: a get("color"), stroke: a get("box") get("color"), width: _pt(1)})
+            }
+            (k == "violin") ifTrue {
+                fill = (a get("colors") != nil) ifTrue { a get("colors") first } ifFalse { a get("color") }
+                cv rect(hx, y - (fs * 0.35), handle, fs * 0.7, #{fill: fill, alpha: a get("alpha")})
+            }
             (k == "bars" || k == "fill" || k == "wedge") ifTrue {
                 fill = (a get("colors") != nil) ifTrue { a get("colors") first } ifFalse { a get("color") }
                 cv rect(hx, y - (fs * 0.35), handle, fs * 0.7, #{fill: fill, alpha: a get("alpha"), stroke: a get("edgecolor"), width: _pt(1)})
@@ -1450,6 +1668,22 @@ PlotAxes = Object clone {
                         pts append([_px(span at(0)), _py(top)]); pts append([_px(span at(1)), _py(top)])
                         pts append([_px((span at(0) + span at(1)) / 2), _py(top)])
                     }
+                }
+            }
+        }
+        artists each { |a|
+            k = a get("kind")
+            (k == "boxes" || k == "violin") ifTrue {
+                a get("positions") size times { |i|
+                    pos = a get("positions") at(i)
+                    vals = (k == "boxes") ifTrue {
+                        st = a get("stats") at(i)
+                        (st get("n") > 0) ifTrue { [st get("whislo"), st get("q1"), st get("med"), st get("q3"), st get("whishi")] + st get("fliers") } ifFalse { [] }
+                    } ifFalse {
+                        b = a get("bodies") at(i)
+                        b get("coords")
+                    }
+                    vals each { |v| pts append(_boxPoint(a get("vert"), pos, v)) }
                 }
             }
         }
@@ -1603,6 +1837,26 @@ PlotAxes = Object clone {
                         incX value(span at(0)); incX value(span at(1))
                         incY value(base); incY value(base + a get("lengths") at(i))
                         useY ifTrue { stickyY append(base) }
+                    }
+                }
+            }
+            (k == "boxes" || k == "violin") ifTrue {
+                incPos = a get("vert") ifTrue { incX } ifFalse { incY }
+                incVal = a get("vert") ifTrue { incY } ifFalse { incX }
+                a get("positions") size times { |i|
+                    half = _nth(a get("widths"), i) / 2.0
+                    pos = a get("positions") at(i)
+                    incPos value(pos - half); incPos value(pos + half)
+                    (k == "boxes") ifTrue {
+                        st = a get("stats") at(i)
+                        (st get("n") > 0) ifTrue {
+                            incVal value(st get("whislo")); incVal value(st get("whishi"))
+                            a get("showfliers") ifTrue { st get("fliers") each(incVal) }
+                            a get("showmeans") ifTrue { incVal value(st get("mean")) }
+                        }
+                    } ifFalse {
+                        b = a get("bodies") at(i)
+                        incVal value(b get("min")); incVal value(b get("max"))
                     }
                 }
             }
@@ -1909,6 +2163,65 @@ PlotAxes = Object clone {
         fmt = nil
         ((items size > 0) && (items last type == "String")) ifTrue { fmt = items pop }
         [items, fmt, opts]
+    }
+
+    // Data for boxplot / violinplot as [sets, names]: one Array of numbers
+    // is one set; an Array of Arrays is several; a Dict's keys name its sets
+    _datasets(data, who) {
+        (data type == "Dict") ifTrue {
+            sets = []
+            names = []
+            data each { |k, v| names append(k toString); sets append(_seq(v)) }
+            (sets size == 0) ifTrue { raise("Plot: " + who + " needs data") }
+            return [sets, names]
+        }
+        d = _seq(data)
+        ((d == nil) || (d size == 0)) ifTrue { raise("Plot: " + who + " needs data: values, or a list of value lists") }
+        ((d first type == "Number") || (d first == nil)) ifTrue { return [[d], nil] }
+        [d map { |s| _seq(s) }, nil]
+    }
+
+    // orientation: "vertical" / "horizontal", or vert: false
+    _vertical(opts) {
+        o = opts get("orientation")
+        (o == nil) ifTrue { return opts get("vert") ?? true }
+        ((o != "vertical") && (o != "horizontal")) ifTrue { raise("Plot: orientation must be \"vertical\" or \"horizontal\"") }
+        o == "vertical"
+    }
+
+    _positions(opts, n, who) {
+        p = _seq(opts get("positions")) ?? (1..n) toArray
+        (p size != n) ifTrue { raise("Plot: " + who + ": " + n toString + " data sets but " + p size toString + " positions") }
+        p
+    }
+
+    // Ticks naming the boxes or violins, unless ticks were chosen already
+    _categoryTicks(vert, positions, labels) {
+        labs = (labels == nil) ifTrue { positions map { |p| PlotTicks short(p) } } ifFalse { _seq(labels) map { |s| s toString } }
+        spec = #{values: positions, labels: labs, rotation: 0}
+        vert ifTrue { (xtickSpec == nil) ifTrue { self xtickSpec = spec } } ifFalse { (ytickSpec == nil) ifTrue { self ytickSpec = spec } }
+    }
+
+    // A line style from matplotlib-style props: color, linewidth (lw), linestyle (ls), alpha
+    _lineProps(p, color, lw, edge) {
+        p = p ?? #{}
+        #{color: PlotColor hex(edge ?? p get("color") ?? color), linewidth: p get("linewidth") ?? p get("lw") ?? lw,
+          linestyle: p get("linestyle") ?? p get("ls") ?? "-", alpha: p get("alpha")}
+    }
+
+    // A marker style from props: marker, markerfacecolor (mfc; "none" for
+    // hollow), markeredgecolor (mec), markersize (ms), alpha
+    _markerProps(p, marker, face, edge) {
+        p = p ?? #{}
+        f = p get("markerfacecolor") ?? p get("mfc") ?? face
+        #{marker: p get("marker") ?? marker, face: _hexOrNil(f),
+          edge: _hexOrNil(p get("markeredgecolor") ?? p get("mec") ?? p get("color") ?? edge),
+          size: p get("markersize") ?? p get("ms") ?? _rc("lines.markersize"), alpha: p get("alpha")}
+    }
+
+    _strokeOf(props) {
+        lw = _pt(props get("linewidth"))
+        #{stroke: props get("color"), width: lw, dash: _dash(props get("linestyle"), lw), alpha: props get("alpha"), cap: "butt"}
     }
 
     _seq(v) {

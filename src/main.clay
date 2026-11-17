@@ -16,7 +16,8 @@
 // Plot keeps a current figure and axes, as pyplot does; the drawing methods
 // (plot, scatter, bar, hist, imshow ...) go to the current axes. Figures and
 // axes can also be used directly: PlotFigure, PlotAxes. Colours and
-// colormaps are in PlotColor, tick placement in PlotTicks, and the backends
+// colormaps are in PlotColor, tick placement in PlotTicks, the statistics
+// behind box and violin plots in PlotStats, and the backends
 // are PlotSvg, PlotPng (which draws on the image brick's Canvas) and
 // PlotTerm (text for terminals). PlotML has the machine-learning plots and
 // PlotLive the learning curve drawn as training runs.
@@ -27,6 +28,7 @@
 import("image")
 import("color.clay")
 import("ticks.clay")
+import("stats.clay")
 import("svg.clay")
 import("png.clay")
 import("term.clay")
@@ -126,6 +128,8 @@ Plot = Object clone {
     colorbar(art = nil, opts = nil) { gca colorbar(art, opts) }
     step(x, y, a = nil, b = nil) { gca step(x, y, a, b) }
     errorbar(x, y, a = nil, b = nil) { gca errorbar(x, y, a, b) }
+    boxplot(data, opts = nil) { gca boxplot(data, opts) }
+    violinplot(data, opts = nil) { gca violinplot(data, opts) }
     pie(values, opts = nil) { gca pie(values, opts) }
     stackplot(x, a = nil, b = nil, c = nil, d = nil, e = nil, f = nil, g = nil, h = nil) { gca stackplot(x, a, b, c, d, e, f, g, h) }
     barLabel(bars, opts = nil) { gca barLabel(bars, opts) }

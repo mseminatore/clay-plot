@@ -1,0 +1,107 @@
+// PlotStats -- the statistics behind box plots and violin plots
+//
+//   s = PlotStats boxStats([1, 2, 3, 4, 100])
+//   s get("med")       // 3
+//   s get("fliers")    // [100]
+//   k = PlotStats kde([1, 2, 2, 3], 50)   // #{coords: [...], density: [...]}
+//
+// Quantiles are numpy's default (linear between the closest ranks), so
+// boxes come out where matplotlib puts them.
+
+PlotStats = Object clone {
+    // The numbers in values (nil, nan and anything else left out), sorted
+    clean(values) {
+        (values filter { |v| (v != nil) && (v type == "Number") && (v == v) }) sort
+    }
+
+    // The q-th quantile (0..1) of sorted numbers
+    quantile(sorted, q) {
+        n = sorted size
+        (n == 0) ifTrue { return nil }
+        h = (n - 1) * q toFloat
+        lo = Math floor(h)
+        hi = Math ceil(h)
+        a = sorted at(lo)
+        a + ((h - lo) * (sorted at(hi) - a))
+    }
+
+    mean(values) {
+        (values size == 0) ifTrue { return nil }
+        values sum / values size toFloat
+    }
+
+    // Sample standard deviation (n - 1 below the line, as numpy's ddof=1)
+    std(values) {
+        n = values size
+        (n < 2) ifTrue { return 0.0 }
+        m = mean(values)
+        Math sqrt((values reduce(0.0) { |s, v| s + ((v - m) * (v - m)) }) / (n - 1))
+    }
+
+    // A box plot's numbers for one data set: #{n, q1, med, q3, iqr, mean,
+    // whislo, whishi, fliers, cilo, cihi}. whis is how far the whiskers may
+    // reach, in box lengths (1.5), or [lo, hi] percentiles such as [5, 95].
+    // The whiskers end at the furthest data inside that reach; anything
+    // beyond is a flier. cilo..cihi is the notch (median +- 1.57 IQR / sqrt n).
+    boxStats(values, whis = 1.5) {
+        s = clean(values)
+        n = s size
+        (n == 0) ifTrue { return #{n: 0, fliers: []} }
+        q1 = quantile(s, 0.25)
+        med = quantile(s, 0.5)
+        q3 = quantile(s, 0.75)
+        iqr = q3 - q1
+        reachLo = nil
+        reachHi = nil
+        (whis type == "Array") ifTrue {
+            reachLo = quantile(s, whis at(0) / 100.0)
+            reachHi = quantile(s, whis at(1) / 100.0)
+        } ifFalse {
+            reachLo = q1 - (whis * iqr)
+            reachHi = q3 + (whis * iqr)
+        }
+        inside = s filter { |v| (v >= reachLo) && (v <= reachHi) }
+        whislo = (inside size > 0) ifTrue { inside first } ifFalse { q1 }
+        whishi = (inside size > 0) ifTrue { inside last } ifFalse { q3 }
+        // whiskers never start inside the box
+        whislo = Math min(whislo, q1)
+        whishi = Math max(whishi, q3)
+        notch = (1.57 * iqr) / Math sqrt(n)
+        #{n: n, q1: q1, med: med, q3: q3, iqr: iqr, mean: mean(s), whislo: whislo, whishi: whishi,
+          fliers: s filter { |v| (v < whislo) || (v > whishi) }, cilo: med - notch, cihi: med + notch}
+    }
+
+    // A Gaussian kernel density estimate of values at points evenly spaced
+    // from their smallest to their largest: #{coords:, density:}. bw is the
+    // bandwidth rule, "scott" (the default) or "silverman", or a number that
+    // multiplies the standard deviation (as matplotlib's bw_method).
+    kde(values, points = 100, bw = nil) {
+        s = clean(values)
+        n = s size
+        (n == 0) ifTrue { return #{coords: [], density: []} }
+        lo = s first
+        hi = s last
+        sd = std(s)
+        ((sd == 0) || (lo == hi)) ifTrue { return #{coords: [lo, hi], density: [1.0, 1.0]} }
+        factor = (bw == nil || bw == "scott") ifTrue { Math pow(n, 0 - 0.2) } ifFalse {
+            (bw == "silverman") ifTrue { Math pow((n * 3) / 4.0, 0 - 0.2) } ifFalse {
+                (bw type == "Number") ifTrue { bw } ifFalse { raise("Plot: bw_method must be \"scott\", \"silverman\" or a number") }
+            }
+        }
+        h = factor * sd
+        k = Math max(points, 2)
+        coords = (0..(k - 1)) map { |i| lo + (((hi - lo) * i) / (k - 1) toFloat) }
+        norm = 1.0 / (n * h * Math sqrt(2 * Math pi))
+        // Math exp is missing from older Clays; e^x is the same
+        e = 2.718281828459045
+        density = coords map { |c|
+            total = 0.0
+            s each { |v|
+                z = (c - v) / h
+                (z abs < 6) ifTrue { total = total + Math pow(e, 0 - (0.5 * z * z)) }
+            }
+            total * norm
+        }
+        #{coords: coords, density: density}
+    }
+}

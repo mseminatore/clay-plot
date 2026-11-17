@@ -254,6 +254,72 @@ Test describe("Dashboard charts") {
     }
 }
 
+Test describe("Box and violin plots") {
+    Test it("works out quartiles as numpy does") {
+        Test assertEqual(PlotStats quantile([1, 2, 3, 4], 0.25), 1.75)
+        Test assertEqual(PlotStats quantile([1, 2, 3, 4], 0.5), 2.5)
+        Test assertEqual(PlotStats clean([3, nil, 1, 0.0 / 0.0, 2]), [1, 2, 3])
+        Test assertEqual(Math round(PlotStats std([2, 4, 4, 4, 5, 5, 7, 9]) * 1000), 2138)
+    }
+    Test it("finds whiskers and fliers") {
+        s = PlotStats boxStats([1, 2, 3, 4, 100])
+        Test assertEqual([s get("q1"), s get("med"), s get("q3")], [2, 3, 4])
+        Test assertEqual([s get("whislo"), s get("whishi")], [1, 4])
+        Test assertEqual(s get("fliers"), [100])
+        // whiskers at percentiles instead
+        p = PlotStats boxStats((0..100) toArray, [10, 90])
+        Test assertEqual([p get("whislo"), p get("whishi")], [10, 90])
+        Test assertEqual(p get("fliers") size, 20)
+        Test assertEqual(PlotStats boxStats([]) get("n"), 0)
+    }
+    Test it("estimates densities that peak at the middle") {
+        k = PlotStats kde([1, 2, 2, 3, 3, 3, 4, 4, 5], 9)
+        d = k get("density")
+        Test assertEqual(k get("coords") first, 1)
+        Test assertEqual(k get("coords") last, 5)
+        Test assertEqual(d indexOf(d max), 4)
+        Test assertTrue((d at(0) - d at(8)) abs < 0.0001)        // symmetric data
+        Test assertEqual(PlotStats kde([2, 2, 2]) get("density"), [1.0, 1.0])
+        Test assertRaises({ PlotStats kde([1, 2, 3], 10, "wide") })
+    }
+    Test it("draws boxes with category labels") {
+        Plot close
+        b = Plot boxplot([[1, 2, 3, 4, 100], [2, 3, 4]], #{labels: ["a", "b"]})
+        Test assertEqual(b get("stats") size, 2)
+        Test assertEqual(b get("stats") first get("fliers"), [100])
+        [lo, hi] = Plot xlim
+        Test assertTrue((lo < 0.75) && (hi > 2.25))
+        Test assertTrue(Plot ylim at(1) > 100)                   // the flier is in view
+        svg = Plot toSvg
+        Test assertTrue(svg contains(">a</text>"))
+        Test assertEqual(count value(svg, "<polygon"), 2)        // the boxes
+        Test assertEqual(count value(svg, "<circle"), 1)         // the flier
+        Plot close
+        Plot boxplot(#{left: [1, 2, 3], right: [4, 5, 6]}, #{orientation: "horizontal", sym: "", showmeans: true, notch: true})
+        svg = Plot toSvg
+        Test assertTrue(svg contains(">right</text>"))
+        Test assertEqual(count value(svg, "<polygon"), 4)        // 2 notched boxes + 2 mean triangles
+        Test assertRaises({ Plot boxplot([1, 2], #{positions: [1, 2]}) })
+        Test assertRaises({ Plot boxplot([1, 2], #{orientation: "diagonal"}) })
+        Test assertRaises({ Plot boxplot([]) })
+        Plot close
+    }
+    Test it("draws violins") {
+        Plot close
+        v = Plot violinplot([[1, 2, 2, 3, 3, 3, 4], [5, 6, 6, 7]], #{showmedians: true, quantiles: [0.25, 0.75], points: 20, label: "dist"})
+        Test assertEqual(v get("bodies") size, 2)
+        Test assertEqual(v get("bodies") first get("median"), 3)
+        Test assertEqual(v get("bodies") first get("coords") size, 20)
+        Test assertEqual(v get("color"), PlotColor hex(PlotColor cycleColor(0)))
+        Plot legend
+        svg = Plot toSvg
+        Test assertEqual(count value(svg, "<polygon"), 2)
+        Test assertTrue(svg contains(">dist</text>"))
+        Test assertTrue(Plot ylim at(0) < 1)
+        Plot close
+    }
+}
+
 Test describe("Annotations") {
     Test it("points an arrow from the text to the point") {
         Plot close
