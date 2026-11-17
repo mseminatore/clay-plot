@@ -207,13 +207,42 @@ Test describe("SVG output") {
         Test assertEqual(count value(svg, "<circle"), 4)   // 3 points + the legend's marker
         Test assertTrue(svg contains(">data</text>"))
     }
-    Test it("draws image cells, merging runs of one colour") {
+    Test it("embeds images as PNG") {
         Plot close
         Plot imshow([[0, 0, 0], [1, 1, 1]], #{cmap: "gray"})
         Plot axis("off")
         svg = Plot toSvg
-        Test assertEqual(count value(svg, "fill=\"#000000\"/>"), 1)
-        Test assertEqual(count value(svg, "fill=\"#ffffff\"/>"), 2)   // the cells and the background
+        Test assertEqual(count value(svg, "<image "), 1)
+        Test assertTrue(svg contains("xlink:href=\"data:image/png;base64,iVBORw0KGgo"))
+        Test assertTrue(svg contains("image-rendering:pixelated"))
+    }
+    Test it("colours image numbers through the colormap") {
+        Plot close
+        art = Plot imshow([[0, 1], [2, nil]], #{cmap: "gray"})
+        img = Plot gca _imageOf(art)
+        Test assertEqual([img width, img height, img channels], [2, 2, 4])   // RGBA: nil is transparent
+        Test assertEqual(img pixels bytes, [0, 0, 0, 255, 128, 128, 128, 255, 255, 255, 255, 255, 0, 0, 0, 0])
+    }
+    Test it("draws colour rows and Images as they are") {
+        Plot close
+        art = Plot imshow([[[255, 0, 0], [0, 0, 255]]])
+        Test assertEqual(Plot gca _imageOf(art) pixels bytes, [255, 0, 0, 0, 0, 255])
+        art = Plot imshow([[[1, 0, 0, 0.5]]])
+        Test assertEqual(Plot gca _imageOf(art) pixels bytes, [255, 0, 0, 128])
+        pic = Image fromBytes(2, 1, 3, String fromBytes([1, 2, 3, 4, 5, 6]))
+        art = Plot imshow(pic)
+        Test assertEqual(art get("source"), pic)
+        Test assertEqual([art get("nrows"), art get("ncols")], [1, 2])
+    }
+    Test it("draws a colour bar as an image") {
+        Plot close
+        Plot imshow([[1, 2], [3, 4]])
+        Plot colorbar
+        Test assertEqual(count value(Plot toSvg, "<image "), 2)
+    }
+    Test it("encodes base64") {
+        Test assertEqual(["Man", "Ma", "M", ""] map { |s| PlotSvg base64(s) }, ["TWFu", "TWE=", "TQ==", ""])
+        Test assertEqual(PlotSvg base64(String fromBytes([255, 254, 0])), "//4A")
     }
     Test it("hides ticks given an empty list") {
         Plot close

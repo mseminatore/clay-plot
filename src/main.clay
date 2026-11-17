@@ -22,6 +22,7 @@
 // Every brick shares one set of top-level names with the program that imports
 // it, so this one's all start with Plot.
 
+import("image")
 import("color.clay")
 import("ticks.clay")
 import("svg.clay")

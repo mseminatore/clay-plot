@@ -3,7 +3,8 @@
 Charts and figures for [Clay](https://github.com/mseminatore/clay), in the style of
 matplotlib's `pyplot`: line plots, scatter plots, bar charts, histograms, images and heatmaps,
 subplots, legends, colour bars and colormaps. Figures are saved as SVG, which any browser
-shows and which web pages and Markdown can embed.
+shows and which web pages and Markdown can embed; images and heatmaps go inside them as PNG,
+made by [clay-image](https://github.com/mseminatore/clay-image).
 
 If you know matplotlib, you already know most of it: the function names, format strings
 (`"r--"`, `"o-"`), colour names (`"C1"`, `"tab:orange"`), colormaps (`"viridis"`) and
@@ -76,7 +77,7 @@ return the artist they add, a Dict (`line get("color")`, `line set("label", "new
 | `fillBetween(xs, y1, y2, opts)` | Shades between two curves (`y2` is 0 if left out, or a number). `color`, `alpha`, `edgecolor`, `label`. |
 | `axhline(y, opts)`, `axvline(x, opts)` | A line across the whole axes. `color`, `linestyle`, `linewidth`, `alpha`, `label`. |
 | `text(x, y, s, opts)` | Text at data coordinates, or axes fractions with `transform: "axes"`. `fontsize`, `color`, `ha` (`"left"`, `"center"`, `"right"`), `va` (`"baseline"`, `"center"`, `"top"`, `"bottom"`), `rotation`, `fontweight`. |
-| `imshow(data, opts)` | An image or heatmap: rows of numbers (through `cmap`, scaled to `vmin`..`vmax`) or rows of `[r, g, b]` pixels (0..1, or 0..255). A flat Array needs `shape: [rows, cols]` unless it is square: 784 numbers show as 28 x 28. An `Image` from [clay-image](https://github.com/mseminatore/clay-image) works too. Options: `cmap`, `vmin`, `vmax`, `aspect` (`"equal"` or `"auto"`), `origin` (`"upper"` or `"lower"`), `extent`. |
+| `imshow(data, opts)` | An image or heatmap: rows of numbers (through `cmap`, scaled to `vmin`..`vmax`; `nil` and `nan` cells are transparent) or rows of `[r, g, b]` or `[r, g, b, a]` pixels (0..1, or 0..255). A flat Array needs `shape: [rows, cols]` unless it is square: 784 numbers show as 28 x 28. An `Image` from [clay-image](https://github.com/mseminatore/clay-image) works too. Options: `cmap`, `vmin`, `vmax`, `aspect` (`"equal"` or `"auto"`), `origin` (`"upper"` or `"lower"`), `extent`. |
 | `colorbar(artist, opts)` | A colour bar beside the axes for an image or a colour-mapped scatter (the last one if you leave the artist out). `label`. |
 
 ### Labels and settings
@@ -180,15 +181,25 @@ fig savefig("samples.svg")
 ![A grid of samples](docs/images/digits.svg)
 
 Weight matrices, convolution filters and spectrograms are `imshow` too (a diverging map such
-as `coolwarm` with `vmin: -m, vmax: m` suits weights).
+as `coolwarm` with `vmin: -m, vmax: m` suits weights). A spectrogram, one row per mel band,
+lowest band at the bottom:
+
+```clay
+Plot figure(#{figsize: [8, 3.5]})
+Plot imshow(spec, #{origin: "lower", aspect: "auto", cmap: "magma"})
+Plot colorbar(#{label: "dB"})
+Plot xlabel("frame"); Plot ylabel("mel band")
+```
+
+![A spectrogram](docs/images/spectrogram.svg)
 
 ## Limitations
 
 - SVG is the only output format so far. PNG (through clay-image) is planned.
 - SVG viewers measure the text, so the layout estimates text widths; unusual fonts may sit a
   little closer or further than intended.
-- Images are drawn as SVG rectangles (runs of one colour merged), which suits MNIST-sized
-  images and small heatmaps; very large images make large files until PNG embedding lands.
+- Images are embedded as base64 PNG, which makes an SVG about a third larger than the PNG
+  itself (a 128 x 400 spectrogram is about 200 KB).
 - No log scales, error bars, pie charts, contour plots or 3-D yet.
 
 ## Install
@@ -197,9 +208,14 @@ as `coolwarm` with `vmin: -m, vmax: m` suits weights).
 clay bricks add github.com/mseminatore/clay-plot plot
 ```
 
+clay-plot depends on [clay-image](https://github.com/mseminatore/clay-image), a native brick:
+its C code (stb_image) is compiled the first time it is imported, which needs a C compiler,
+and `clay bricks add` asks before installing it.
+
 ## Develop
 
 ```sh
+clay bricks install                # fetches clay-image into bricks/
 clay tests/test_plot.clay          # a brick can import itself by name
 clay examples/gallery.clay         # writes example figures to examples/out/
 clay examples/ml.clay
@@ -209,8 +225,12 @@ The code is in `src/`: `main.clay` (`Plot`, the pyplot-style functions and `rc`)
 `figure.clay` (`PlotFigure`: layout and saving), `axes.clay` (`PlotAxes`: artists, scales,
 ticks, legend, drawing), `ticks.clay` (`PlotTicks`), `color.clay` (`PlotColor`) and `svg.clay`
 (`PlotSvg`). Axes draw through a handful of primitives (`line`, `polyline`, `polygon`,
-`rect`, `circle`, `text`, `pixels`, `clip`, `measure`) listed at the top of `svg.clay`, so a new
+`rect`, `circle`, `text`, `image`, `clip`, `measure`) listed at the top of `svg.clay`, so a new
 backend implements just those.
+
+To work on clay-image at the same time, replace `bricks/image` with a link to your checkout
+(`mklink /J bricks\image ..\clay-image` on Windows, `ln -s ../../clay-image bricks/image`
+elsewhere).
 
 `.github/workflows/test.yml` runs the tests on Linux, macOS and Windows for every push and
 pull request on GitHub.

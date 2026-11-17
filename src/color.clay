@@ -20,6 +20,7 @@ PlotColor = Object clone {
     _names = nil
     _maps = nil
     _luts = nil
+    _palettes = nil
 
     // [r, g, b] in 0..255 for any colour spec above
     rgb(spec) {
@@ -81,6 +82,19 @@ PlotColor = Object clone {
         table = (0..255) map { |i| toHex(colormap(name, i / 255.0)) }
         _luts set(name, table)
         table
+    }
+
+    // A colormap as 256 colours of r, g, b bytes in a String (the palette
+    // Image colormap takes), cached by name
+    palette(name) {
+        (_palettes == nil) ifTrue { _palettes = Dict clone }
+        cached = _palettes get(name)
+        (cached != nil) ifTrue { return cached }
+        bytes = []
+        256 times { |i| bytes = bytes + colormap(name, i / 255.0) }
+        pal = String fromBytes(bytes)
+        _palettes set(name, pal)
+        pal
     }
 
     // The colormap names you can use (without the "_r" variants)

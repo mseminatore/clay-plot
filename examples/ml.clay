@@ -74,4 +74,22 @@ Plot grid(#{axis: "x"})
 Plot title("Per-layer magnitude", #{loc: "left"})
 Plot savefig(out + "/layers.svg")
 Plot close
+
+// a spectrogram-sized heatmap: 128 bands x 400 frames, low bands at the bottom
+bands = 128
+frames = 400
+spec = (0..(bands - 1)) map { |b|
+    (0..(frames - 1)) map { |f|
+        pitch = 20 + (12 * Math sin(f / 40.0))
+        d = (b - pitch) abs
+        harmonic = (b - (pitch * 2)) abs
+        (0 - 60) + (50 / (1 + (d * 0.4))) + (25 / (1 + (harmonic * 0.5))) + (rand value * 8)
+    }
+}
+Plot figure(#{figsize: [8, 3.5]})
+Plot imshow(spec, #{origin: "lower", aspect: "auto", cmap: "magma"})
+Plot colorbar(#{label: "dB"})
+Plot xlabel("frame"); Plot ylabel("mel band"); Plot title("Spectrogram")
+Plot savefig(out + "/spectrogram.svg")
+Plot close
 ("wrote " + out) println

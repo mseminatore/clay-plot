@@ -210,16 +210,22 @@ PlotAxes = Object clone {
     // or "lower"), extent [left, right, bottom, top].
     imshow(data, opts = nil) {
         opts = opts ?? #{}
-        rows = _grid(data, opts get("shape"))
-        nr = rows size
-        nc = rows first size
-        rgb = rows first first type == "Array"
+        // a colour Image is drawn as it is; anything else becomes rows
+        source = nil
+        rows = nil
+        ((data hasMethod("pngBytes")) && (data hasMethod("channels"))) ifTrue {
+            (data channels >= 3) ifTrue { source = data }
+        }
+        (source == nil) ifTrue { rows = _grid(data, opts get("shape")) }
+        nr = (source != nil) ifTrue { source height } ifFalse { rows size }
+        nc = (source != nil) ifTrue { source width } ifFalse { rows first size }
+        rgb = (source != nil) || (rows first first type == "Array")
         lower = opts get("origin") == "lower"
         ext = opts get("extent")
         (ext == nil) ifTrue {
             ext = lower ifTrue { [-0.5, nc - 0.5, -0.5, nr - 0.5] } ifFalse { [-0.5, nc - 0.5, nr - 0.5, -0.5] }
         }
-        art = #{kind: "image", rows: rows, nrows: nr, ncols: nc, rgb: rgb, extent: ext,
+        art = #{kind: "image", rows: rows, source: source, nrows: nr, ncols: nc, rgb: rgb, extent: ext,
                 cmap: opts get("cmap") ?? _rc("image.cmap"), alpha: opts get("alpha"), label: nil}
         rgb ifFalse { _setRange(art, rows flatten, opts) }
         artists append(art)
@@ -570,22 +576,29 @@ PlotAxes = Object clone {
         xb = _px(ext at(1))
         ya = _py(ext at(2))
         yb = _py(ext at(3))
+        img = art get("source") ?? _imageOf(art)
+        // the first row belongs at the extent's top: flip when that is lower
+        cv image(Math min(xa, xb), Math min(ya, yb), (xb - xa) abs, (yb - ya) abs, img,
+                 #{alpha: art get("alpha"), flipY: yb > ya})
+    }
+
+    // An image artist's rows as an Image: colours as they are (0..1, or
+    // 0..255 when any is over 1), numbers through the colormap (nil and nan
+    // left transparent)
+    _imageOf(art) {
         rows = art get("rows")
-        // rows run from the top edge (extent's top) to the bottom
-        (yb > ya) ifTrue { rows = rows reverse }
-        cells = nil
+        nr = rows size
+        nc = rows first size
         art get("rgb") ifTrue {
-            peak = rows reduce(0) { |m, row| row reduce(m) { |m2, p| Math max(m2, Math max(p at(0), Math max(p at(1), p at(2)))) } }
-            scale = (peak > 1) ifTrue { 1.0 } ifFalse { 255.0 }
-            cells = rows map { |row| row map { |p| PlotColor toHex([Math round(p at(0) * scale), Math round(p at(1) * scale), Math round(p at(2) * scale)]) } }
-        } ifFalse {
-            lut = PlotColor lut(art get("cmap"))
-            lo = art get("vmin")
-            span = (art get("vmax") - lo) toFloat
-            (span == 0) ifTrue { span = 1.0 }
-            cells = rows map { |row| row map { |v| _ok(v) ifTrue { lut at(Math round((((v - lo) / span) clamp(0, 1)) * 255)) } ifFalse { nil } } }
+            ch = (rows first first size >= 4) ifTrue { 4 } ifFalse { 3 }
+            flat = (rows flatten) map { |p| p slice(0, ch) }
+            flat = flat flatten
+            (flat max > 1) ifTrue { flat = flat map { |v| v / 255.0 } }
+            return Image fromFloats(nc, nr, ch, flat)
         }
-        cv pixels(Math min(xa, xb), Math min(ya, yb), (xb - xa) abs, (yb - ya) abs, cells)
+        nan = 0.0 / 0.0
+        flat = (rows flatten) map { |v| _ok(v) ifTrue { v } ifFalse { nan } }
+        Image colormap(nc, nr, flat, PlotColor palette(art get("cmap")), art get("vmin"), art get("vmax"))
     }
 
     _drawText(cv, art) {
@@ -807,10 +820,8 @@ PlotAxes = Object clone {
         y = b at(1)
         w = _pt(10)
         h = b at(3)
-        lut = PlotColor lut(a get("cmap"))
-        steps = 128
-        cells = (0..(steps - 1)) map { |i| [lut at(Math round(((steps - 1 - i) * 255.0) / (steps - 1)))] }
-        cv pixels(x, y, w, h, cells)
+        // 256 steps of the colormap, highest at the top
+        cv image(x, y, w, h, Image colormap(1, 256, (0..255) map { |i| 255 - i }, PlotColor palette(a get("cmap")), 0, 255))
         lw = _pt(_rc("axes.linewidth"))
         cv rect(x, y, w, h, #{stroke: "#000000", width: lw})
         lo = a get("vmin")

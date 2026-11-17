@@ -5,7 +5,7 @@
 //   line(x1, y1, x2, y2, style)       polyline(xs, ys, style)
 //   polygon(xs, ys, style)            rect(x, y, w, h, style)
 //   circle(cx, cy, r, style)          text(x, y, string, style)
-//   pixels(x, y, w, h, rows)          rows of "#rrggbb" strings, drawn as cells
+//   image(x, y, w, h, img, style)     an Image (image brick), pixels kept sharp
 //   clip(x, y, w, h) / unclip         clip what follows to a rectangle
 //   measure(string, size)             a text's width in pixels
 // Coordinates are pixels from the top left. A style is a Dict: stroke, fill
@@ -27,7 +27,7 @@ PlotSvg = Object clone {
         self parts = []
         self clips = 0
         parts append("<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n")
-        parts append("<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"" + num(w) + "\" height=\"" + num(h) +
+        parts append("<svg xmlns=\"http://www.w3.org/2000/svg\" xmlns:xlink=\"http://www.w3.org/1999/xlink\" width=\"" + num(w) + "\" height=\"" + num(h) +
             "\" viewBox=\"0 0 " + num(w) + " " + num(h) + "\" font-family=\"" + family + "\">\n")
         (background != nil) ifTrue {
             parts append("<rect width=\"100%\" height=\"100%\" fill=\"" + background + "\"/>\n")
@@ -79,31 +79,19 @@ PlotSvg = Object clone {
         }
     }
 
-    // A grid of cells, rows top to bottom, each row an Array of "#rrggbb"
-    // (or nil to leave a cell empty). Neighbouring cells of one colour are
-    // drawn as one rectangle.
-    pixels(x, y, w, h, rows) {
-        nr = rows size
-        (nr == 0) ifTrue { return nil }
-        nc = rows at(0) size
-        cw = w / nc toFloat
-        ch = h / nr toFloat
-        parts append("<g shape-rendering=\"crispEdges\">\n")
-        nr times { |r|
-            row = rows at(r)
-            y0 = y + (r * ch)
-            c = 0
-            { c < nc } whileTrue {
-                color = row at(c)
-                run = 1
-                { (c + run < nc) && (row at(c + run) == color) } whileTrue { run = run + 1 }
-                (color != nil) ifTrue {
-                    parts append("<rect x=\"" + num(x + (c * cw)) + "\" y=\"" + num(y0) + "\" width=\"" + num((run * cw) + 0.01) + "\" height=\"" + num(ch + 0.01) + "\" fill=\"" + color + "\"/>\n")
-                }
-                c = c + run
-            }
+    // An Image (from the image brick) stretched over the rectangle, its
+    // pixels kept sharp. style: alpha, flipY (draw it upside down).
+    image(x, y, w, h, img, style = nil) {
+        st = style ?? #{}
+        a = ""
+        alpha = st get("alpha")
+        (alpha != nil && alpha < 1) ifTrue { a = a + " opacity=\"" + num(alpha) + "\"" }
+        (st get("flipY") == true) ifTrue {
+            a = a + " transform=\"matrix(1 0 0 -1 0 " + num((y * 2) + h) + ")\""
         }
-        parts append("</g>\n")
+        parts append("<image x=\"" + num(x) + "\" y=\"" + num(y) + "\" width=\"" + num(w) + "\" height=\"" + num(h) +
+            "\" preserveAspectRatio=\"none\" image-rendering=\"optimizeSpeed\" style=\"image-rendering:pixelated\"" + a +
+            " xlink:href=\"data:image/png;base64," + base64(img pngBytes) + "\"/>\n")
     }
 
     clip(x, y, w, h) {
@@ -185,6 +173,30 @@ PlotSvg = Object clone {
             text = text + "." + ((frac % 10 == 0) ifTrue { (frac / 10) toString } ifFalse { frac toString padLeft(2, "0") })
         }
         (neg && n != 0) ifTrue { "-" + text } ifFalse { text }
+    }
+
+    // Base64 of a String of bytes (for data: URIs)
+    base64(s) {
+        abc = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/" bytes
+        b = s bytes
+        n = b size
+        out = []
+        i = 0
+        { i + 2 < n } whileTrue {
+            v = ((b at(i) << 16) | (b at(i + 1) << 8)) | b at(i + 2)
+            out append(abc at(v >> 18)); out append(abc at((v >> 12) & 63))
+            out append(abc at((v >> 6) & 63)); out append(abc at(v & 63))
+            i = i + 3
+        }
+        (n - i == 1) ifTrue {
+            v = b at(i) << 16
+            out append(abc at(v >> 18)); out append(abc at((v >> 12) & 63)); out append(61); out append(61)
+        }
+        (n - i == 2) ifTrue {
+            v = (b at(i) << 16) | (b at(i + 1) << 8)
+            out append(abc at(v >> 18)); out append(abc at((v >> 12) & 63)); out append(abc at((v >> 6) & 63)); out append(61)
+        }
+        String fromBytes(out)
     }
 
     escape(s) {
