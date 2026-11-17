@@ -1,8 +1,8 @@
 {
   "name": "plot",
   "version": "0.2.0",
-  "clay": ">=0.3.5",
-  "description": "Charts and figures in the style of matplotlib's pyplot: line, scatter, bar, pie, histogram and image plots, subplots, log axes, box, violin, countour, and live training curves, saved as PNG or SVG or drawn in the terminal",
+  "clay": ">=0.3.6",
+  "description": "Charts and figures in the style of matplotlib's pyplot: line, scatter, bar, pie, histogram and image plots, subplots, log axes, box, violin, contour, and live training curves, saved as PNG or SVG or drawn in the terminal",
   "main": "src/main.clay",
   "deps": {
     "image": "github.com/mseminatore/clay-image"

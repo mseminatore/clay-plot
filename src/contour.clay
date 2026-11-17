@@ -58,7 +58,7 @@ PlotContour = Object clone {
     levels(g, spec, filled) {
         ((spec != nil) && (spec type != "Number")) ifTrue {
             l = (spec type == "Range") ifTrue { spec toArray } ifFalse { spec }
-            return PlotStats sortNumbers(l)
+            return l sort
         }
         [lo, hi] = range(g)
         (lo == nil) ifTrue { return [] }
@@ -263,18 +263,6 @@ PlotContour = Object clone {
         out
     }
 
-    // The angle of the direction dx, dy in degrees (Math atan2 is missing
-    // from older Clays: then a close approximation, plenty for turning a label)
-    angle(dx, dy) {
-        (Math hasMethod("atan2")) ifTrue { return (Math atan2(dy, dx) * 180) / Math pi }
-        ((dx == 0) && (dy == 0)) ifTrue { return 0 }
-        ax = dx abs
-        ay = dy abs
-        z = (ax >= ay) ifTrue { ay / ax } ifFalse { ax / ay }
-        a = (z * (Math pi / 4)) + ((0.273 * z) * (1 - z))
-        (ax < ay) ifTrue { a = (Math pi / 2) - a }
-        (dx < 0) ifTrue { a = Math pi - a }
-        (dy < 0) ifTrue { a = 0 - a }
-        (a * 180) / Math pi
-    }
+    // The angle of the direction dx, dy in degrees, anticlockwise from east
+    angle(dx, dy) { (Math atan2(dy, dx) * 180) / Math pi }
 }

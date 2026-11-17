@@ -309,7 +309,7 @@ PlotTerm = Object clone {
                     hits append(xs at(i) + (((sy - ya) / (yb - ya)) * (xs at(j) - xs at(i))))
                 }
             }
-            hits = _sorted(hits)
+            hits = hits sort
             k = 0
             { (k + 1) < hits size } whileTrue {
                 x = Math max(0, Math ceil(hits at(k) - 0.5))
@@ -319,21 +319,6 @@ PlotTerm = Object clone {
             }
             y = y + 1
         }
-    }
-
-    // Insertion sort (few values; Array sort orders floats as text before Clay 0.3.6)
-    _sorted(a) {
-        out = []
-        a each { |v|
-            i = out size
-            out append(v)
-            { (i > 0) && (out at(i - 1) > v) } whileTrue {
-                out setAt(i, out at(i - 1))
-                i = i - 1
-            }
-            out setAt(i, v)
-        }
-        out
     }
 
     _put(col, row, glyph, c) {

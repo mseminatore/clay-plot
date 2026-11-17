@@ -419,8 +419,8 @@ PlotML = Object clone {
             ((y == true) || ((y type == "Number") && (y > 0.5))) ifTrue { pos append(s at(i)) } ifFalse { neg append(s at(i)) }
         }
         ((pos size == 0) || (neg size == 0)) ifTrue { raise("Plot: ROC and precision-recall need both positive and negative targets") }
-        ps = _descending(pos)
-        ns = _descending(neg)
+        ps = pos sort reverse
+        ns = neg sort reverse
         i = 0
         j = 0
         steps = []
@@ -435,10 +435,6 @@ PlotML = Object clone {
         }
         #{positives: ps size, negatives: ns size, steps: steps}
     }
-
-    // Numbers from largest to smallest (see PlotStats sortNumbers for why
-    // not Array sort)
-    _descending(values) { PlotStats sortNumbers(values) reverse }
 
     // ---- grids of images --------------------------------------------------
 

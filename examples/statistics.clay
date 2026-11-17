@@ -5,13 +5,13 @@
 import("plot")
 
 // repeatable random numbers: a Lehmer generator, and normal values from it
-// (Box-Muller; PlotTicks log10 works on Clays without Math log)
+// (Box-Muller)
 seed = 2024
 uniform = { seed = (seed * 48271) % 2147483647; seed / 2147483647.0 }
 normal = { |mu, sd|
     u = uniform value
     v = uniform value
-    mu + (sd * Math sqrt(-2 * PlotTicks log10(u) * 2.302585) * Math cos(2 * Math pi * v))
+    mu + (sd * Math sqrt(-2 * Math log(u)) * Math cos(2 * Math pi * v))
 }
 
 [fig, axs] = Plot subplots(2, 2, #{figsize: [11, 8.5]})

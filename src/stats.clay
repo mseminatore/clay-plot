@@ -11,42 +11,7 @@
 PlotStats = Object clone {
     // The numbers in values (nil, nan and anything else left out), sorted
     clean(values) {
-        sortNumbers(values filter { |v| (v != nil) && (v type == "Number") && (v == v) })
-    }
-
-    // Numbers in increasing order, by merge sort. Array sort in Clay 0.3.5
-    // compares anything but two integers as text (so -0.5 sorts before -1.2,
-    // and 2e-05 after 0.5); this compares numbers.
-    sortNumbers(values) {
-        n = values size
-        (n < 2) ifTrue { return values slice(0, n) }
-        a = values slice(0, n)
-        b = values slice(0, n)
-        width = 1
-        { width < n } whileTrue {
-            lo = 0
-            { lo < n } whileTrue {
-                mid = Math min(lo + width, n)
-                hi = Math min(lo + (width * 2), n)
-                i = lo
-                j = mid
-                k = lo
-                { k < hi } whileTrue {
-                    ((i < mid) && ((j >= hi) || (a at(i) <= a at(j)))) ifTrue {
-                        b setAt(k, a at(i)); i = i + 1
-                    } ifFalse {
-                        b setAt(k, a at(j)); j = j + 1
-                    }
-                    k = k + 1
-                }
-                lo = hi
-            }
-            t = a
-            a = b
-            b = t
-            width = width * 2
-        }
-        a
+        (values filter { |v| (v != nil) && (v type == "Number") && (v == v) }) sort
     }
 
     // The q-th quantile (0..1) of sorted numbers
@@ -127,13 +92,11 @@ PlotStats = Object clone {
         k = Math max(points, 2)
         coords = (0..(k - 1)) map { |i| lo + (((hi - lo) * i) / (k - 1) toFloat) }
         norm = 1.0 / (n * h * Math sqrt(2 * Math pi))
-        // Math exp is missing from older Clays; e^x is the same
-        e = 2.718281828459045
         density = coords map { |c|
             total = 0.0
             s each { |v|
                 z = (c - v) / h
-                (z abs < 6) ifTrue { total = total + Math pow(e, 0 - (0.5 * z * z)) }
+                (z abs < 6) ifTrue { total = total + Math exp(0 - (0.5 * z * z)) }
             }
             total * norm
         }

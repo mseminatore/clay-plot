@@ -346,7 +346,7 @@ fonts do not).
 clay bricks add github.com/mseminatore/clay-plot plot
 ```
 
-clay-plot depends on [clay-image](https://github.com/mseminatore/clay-image), a native brick:
+It needs Clay 0.3.6 or later. clay-plot depends on [clay-image](https://github.com/mseminatore/clay-image), a native brick:
 its C code (stb_image, and its canvas) is compiled the first time it is imported, which needs a C compiler,
 and `clay bricks add` asks before installing it.
 
