@@ -201,13 +201,15 @@ PlotFigure = Object clone {
             cv text(w / 2, pad, suptitleText, #{size: size, anchor: "middle", valign: "top"})
             top = top + (size * 1.4)
         }
-        (axesList size == 0) ifTrue { return cv }
+        // twins (twinx, twiny) are laid out and drawn by the axes they share a box with
+        primary = axesList filter { |ax| ax host == nil }
+        (primary size == 0) ifTrue { return cv }
         areaX = pad
         areaY = top
         areaW = w - (pad * 2)
         areaH = h - top - pad
         // each axes' cell and the margins it asks for
-        cells = axesList map { |ax|
+        cells = primary map { |ax|
             g = ax cell
             cw = areaW / g at(1)
             ch = areaH / g at(0)
@@ -216,20 +218,20 @@ PlotFigure = Object clone {
         gapX = 10 * pt
         gapY = 10 * pt
         margins = []
-        axesList size times { |i|
+        primary size times { |i|
             c = cells at(i)
-            margins append(axesList at(i) _margins(cv, c at(2) * 0.8, c at(3) * 0.8))
+            margins append(primary at(i) _margins(cv, c at(2) * 0.8, c at(3) * 0.8))
         }
         // line up axes that share a grid column (left, right) or row (top, bottom)
-        axesList size times { |i|
-            gi = axesList at(i) cell
+        primary size times { |i|
+            gi = primary at(i) cell
             m = margins at(i)
             l = m at(0)
             t = m at(1)
             r = m at(2)
             b = m at(3)
-            axesList size times { |j|
-                gj = axesList at(j) cell
+            primary size times { |j|
+                gj = primary at(j) cell
                 ((gj at(0) == gi at(0)) && (gj at(1) == gi at(1))) ifTrue {
                     (gj at(3) == gi at(3)) ifTrue {
                         l = Math max(l, margins at(j) at(0))
@@ -246,9 +248,9 @@ PlotFigure = Object clone {
             sepY = (gi at(0) > 1) ifTrue { gapY / 2 } ifFalse { 0 }
             box = [c at(0) + l + sepX, c at(1) + t + sepY,
                    c at(2) - l - r - (sepX * 2), c at(3) - t - b - (sepY * 2)]
-            axesList at(i) _place(cv, box)
+            primary at(i) _place(cv, box)
         }
-        axesList each { |ax| ax draw(cv) }
+        primary each { |ax| ax draw(cv) }
         cv
     }
 

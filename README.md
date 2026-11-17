@@ -57,6 +57,8 @@ fig savefig("subplots.svg")
 | `plt.yscale("log")`, `plt.semilogy(x, y)` | `Plot yscale("log")`, `Plot semilogy(x, y)` |
 | `plt.xticks(pos, labels, rotation=45)` | `Plot xticks(pos, labels, #{rotation: 45})` |
 | `plt.text(0.5, 0.5, "s", transform=ax.transAxes)` | `Plot text(0.5, 0.5, "s", #{transform: "axes"})` |
+| `ax.annotate("max", xy=(x, y), xytext=(tx, ty), arrowprops=dict(arrowstyle="->"))` | `ax annotate("max", [x, y], [tx, ty], #{arrowprops: #{arrowstyle: "->"}})` |
+| `ax2 = ax.twinx()` | `ax2 = ax twinx` |
 | `plt.rcParams["font.size"] = 12` | `Plot rc set("font.size", 12)` |
 | `plt.savefig("f.png", dpi=150)`, `plt.show()`, `plt.close()` | `Plot savefig("f.png", #{dpi: 150})`, `Plot show`, `Plot close` |
 
@@ -84,6 +86,7 @@ return the artist they add, a Dict (`line get("color")`, `line set("label", "new
 | `errorbar(xs, ys, opts)` | Points or a line with error bars. `yerr`, `xerr`: a number, one per point, or `[lows, highs]`; `fmt` (`"o"`, `"s--"`; `"none"` for bars only), `capsize` (points), `ecolor`, `elinewidth`, and `plot`'s options. Returns `[line, bars]`. |
 | `axhline(y, opts)`, `axvline(x, opts)` | A line across the whole axes. `color`, `linestyle`, `linewidth`, `alpha`, `label`. |
 | `text(x, y, s, opts)` | Text at data coordinates, or axes fractions with `transform: "axes"`. `fontsize`, `color`, `ha` (`"left"`, `"center"`, `"right"`), `va` (`"baseline"`, `"center"`, `"top"`, `"bottom"`), `rotation`, `fontweight`. |
+| `annotate(s, xy, xytext, opts)` | Text at `xytext` with an arrow to `xy` (`[x, y]` each; without `xytext` the text goes at `xy`). `xycoords` and `textcoords`: `"data"` (the default), `"axes fraction"`, `"figure fraction"`, or for the text `"offset points"` from `xy`. `arrowprops: #{arrowstyle:, color:, linewidth:, linestyle:, shrink:, shrinkA:, shrinkB:}` draws the arrow; `arrowstyle` is `"-|>"` (the default), `"->"`, `"-"`, `"<-"`, `"<->"`, `"<|-"` or `"<|-|>"`. `bbox: #{fc:, ec:, lw:, pad:, alpha:}` puts a box behind the text. Also `fontsize`, `color`, `ha`, `va`, `fontweight`. |
 | `imshow(data, opts)` | An image or heatmap: rows of numbers (through `cmap`, scaled to `vmin`..`vmax`; `nil` and `nan` cells are transparent) or rows of `[r, g, b]` or `[r, g, b, a]` pixels (0..1, or 0..255). A flat Array needs `shape: [rows, cols]` unless it is square: 784 numbers show as 28 x 28. An `Image` from [clay-image](https://github.com/mseminatore/clay-image) works too. Options: `cmap`, `vmin`, `vmax`, `aspect` (`"equal"` or `"auto"`), `origin` (`"upper"` or `"lower"`), `extent`. |
 | `pie(values, opts)` | A pie chart (the axes become round, without a frame). `labels`, `colors`, `autopct` (`"%1.1f%%"`, `"{:.0f}%"` or a block given the percentage), `startangle` (degrees, anticlockwise from 3 o'clock), `counterclock`, `explode` (an offset per wedge), `radius`, `pctdistance` (0.6), `labeldistance` (1.1), `wedgeprops: #{width:, edgecolor:, linewidth:}` (a `width` makes a donut), `textprops: #{fontsize:, color:}`. Returns `[wedges, texts, autotexts]`; `legend` lists the wedges. |
 | `stackplot(xs, [ys1, ys2, ...], opts)` | Stacked areas, bottom first (the series may also be separate arguments). `labels`, `colors`, `alpha`, `edgecolor`, `baseline` (`"zero"` or `"sym"`). Returns the areas. |
@@ -100,6 +103,7 @@ return the artist they add, a Dict (`line get("color")`, `line set("label", "new
 | `xticks(values, labels, opts)`, `yticks(...)` | Choose the ticks; `labels` names them, `rotation` turns them. `xticks([])` hides them. |
 | `grid(on, opts)` | Grid lines at the ticks: `grid`, `grid(false)`, `grid(#{axis: "y", color:, linestyle:, alpha:})` |
 | `legend(opts)`, `legend(labels)` | A legend of the labelled artists. `loc`: `"best"` (the default: the corner covering the least data), `"upper right"`, `"upper left"`, `"lower left"`, `"lower right"`, `"right"`, `"center left"`, `"center right"`, `"lower center"`, `"upper center"`, `"center"`. Also `fontsize`, `title`, `framealpha`. An Array of labels names the artists in order. |
+| `twinx`, `twiny` | A second axes over this one sharing its x axis, with its own y axis on the right (`twinx`); or sharing y, with an x axis along the top (`twiny`). Returns the new axes (`Plot twinx` also makes it current). The two share one colour cycle and one title, and a legend on either lists the labelled artists of both. |
 | `axis(mode)` | `"off"` hides the frame, ticks and labels; `"equal"` makes a unit the same length on both axes; `"auto"`; `"tight"`; or `[x0, x1, y0, y1]`. |
 | `invertYaxis` | Turn the y axis upside down |
 | `xscale(kind)`, `yscale(kind)` | `"log"` or `"linear"`. Log axes are ticked at powers of ten (with minor ticks between) and leave out values at or below zero. `semilogy(...)`, `semilogx(...)` and `loglog(...)` are `plot` on log axes. |
@@ -293,7 +297,7 @@ fonts do not).
   another sans-serif, which may sit a little closer or further than intended.
 - In SVG, images are embedded as base64 PNG, about a third larger than the PNG itself (a
   128 x 400 spectrogram is about 200 KB).
-- No contour plots, twin axes, date axes, symlog scales or 3-D yet. Log axes label only powers of ten (and 1, 2, 5 when less than two decades show).
+- No contour plots, date axes, symlog scales or 3-D yet. Log axes label only powers of ten (and 1, 2, 5 when less than two decades show).
 
 ## Install
 

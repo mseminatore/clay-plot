@@ -29,6 +29,9 @@ PlotAxes = Object clone {
     colorbarLabel = nil
     xLog = false            // xscale("log")
     yLog = false
+    host = nil              // twinx / twiny: the axes this one shares a box with
+    twinKind = nil          // "x": shares host's x axis (own y on the right); "y": shares y
+    twins = nil             // the twins made from this axes
     // worked out while drawing
     plotBox = nil           // [x, y, w, h] in pixels
     view = nil              // [x0, x1, y0, y1] in data units
@@ -43,6 +46,7 @@ PlotAxes = Object clone {
     init(fig, where = nil) {
         self figure = fig
         self artists = []
+        self twins = []
         self cell = where ?? [1, 1, 0, 0]
         self gridOn = Plot rc get("axes.grid") ?? false
     }
@@ -200,6 +204,58 @@ PlotAxes = Object clone {
                 color: PlotColor hex(opts get("color") ?? "k"), ha: opts get("ha") ?? "left",
                 va: opts get("va") ?? "baseline", rotation: opts get("rotation") ?? 0,
                 transform: opts get("transform") ?? "data", weight: opts get("fontweight")}
+        artists append(art)
+        art
+    }
+
+    // Text pointing at a point, as matplotlib's annotate:
+    //   annotate("peak", [x, y])                     text at the point
+    //   annotate("peak", [x, y], [tx, ty], #{arrowprops: #{}})
+    //   annotate("best", [x, y], #{xytext: [20, 30], textcoords: "offset points",
+    //            arrowprops: #{arrowstyle: "->"}})
+    // xy and xytext are data units, or by xycoords / textcoords: "axes
+    // fraction" (0..1 of the axes, 0, 0 bottom left), "figure fraction", or
+    // for the text, "offset points" from xy (up and right). textcoords is
+    // xycoords unless given. arrowprops draws an arrow from the text to xy:
+    // arrowstyle ("-|>" by default, "->", "-", "<-", "<->", "<|-", "<|-|>"),
+    // color, linewidth (lw), linestyle, alpha, shrink (a fraction of the
+    // length left off each end), shrinkA / shrinkB (points; 2). Also text's
+    // fontsize, color, ha, va, fontweight, and bbox: #{fc:, ec:, lw:, pad:,
+    // alpha:} for a box behind the text.
+    annotate(s, xy, xytext = nil, opts = nil) {
+        (xytext type == "Dict") ifTrue { opts = xytext; xytext = nil }
+        opts = opts ?? #{}
+        xytext = xytext ?? opts get("xytext")
+        _pair(xy, "xy")
+        xc = _coords(opts get("xycoords") ?? "data", false)
+        tc = xc
+        (xytext == nil) ifTrue { xytext = xy } ifFalse {
+            _pair(xytext, "xytext")
+            tc = _coords(opts get("textcoords") ?? xc, true)
+        }
+        art = #{kind: "annotation", text: s toString, xy: xy, xycoords: xc, xytext: xytext, textcoords: tc,
+                fontsize: opts get("fontsize") ?? _rc("font.size"), color: PlotColor hex(opts get("color") ?? "k"),
+                ha: opts get("ha") ?? "left", va: opts get("va") ?? "baseline", weight: opts get("fontweight")}
+        ap = opts get("arrowprops")
+        (ap != nil) ifTrue {
+            style = ap get("arrowstyle") ?? "-|>"
+            ((["-", "->", "-|>", "<-", "<|-", "<->", "<|-|>"] find { |v| v == style }) == nil) ifTrue {
+                raise("Plot: annotate: unknown arrowstyle \"" + style toString + "\" (use \"-|>\", \"->\", \"-\", \"<-\", \"<->\", \"<|-\" or \"<|-|>\")")
+            }
+            headA = (style startsWith("<|")) ifTrue { "filled" } ifFalse { (style startsWith("<")) ifTrue { "open" } ifFalse { nil } }
+            headB = (style endsWith("|>")) ifTrue { "filled" } ifFalse { (style endsWith(">")) ifTrue { "open" } ifFalse { nil } }
+            art set("arrow", #{headA: headA, headB: headB,
+                color: PlotColor hex(ap get("color") ?? ap get("facecolor") ?? ap get("fc") ?? ap get("edgecolor") ?? ap get("ec") ?? "k"),
+                linewidth: ap get("linewidth") ?? ap get("lw") ?? 1, linestyle: ap get("linestyle") ?? ap get("ls") ?? "-",
+                alpha: ap get("alpha"), shrink: ap get("shrink"),
+                shrinkA: ap get("shrinkA") ?? 2, shrinkB: ap get("shrinkB") ?? 2})
+        }
+        bb = opts get("bbox")
+        (bb != nil) ifTrue {
+            art set("bbox", #{fill: _hexOrNil(bb get("fc") ?? bb get("facecolor") ?? "white"),
+                              stroke: _hexOrNil(bb get("ec") ?? bb get("edgecolor") ?? "k"),
+                              linewidth: bb get("lw") ?? bb get("linewidth") ?? 1, pad: bb get("pad"), alpha: bb get("alpha")})
+        }
         artists append(art)
         art
     }
@@ -446,6 +502,38 @@ PlotAxes = Object clone {
     // Precision-recall curves, with their average precision
     precisionRecall(scores, targets, opts = nil) { PlotML precisionRecall(self, scores, targets, opts ?? #{}) }
 
+    // ---- twin axes ------------------------------------------------------
+
+    // A second axes over this one, sharing its x axis, with its own y axis
+    // on the right (matplotlib's twinx): ax2 = ax twinx; ax2 plot(xs, acc).
+    // The twins share one colour cycle, and a legend on either lists the
+    // labelled artists of both.
+    twinx() { _twin("x") }
+
+    // A second axes sharing this one's y axis, with its own x axis along the top
+    twiny() { _twin("y") }
+
+    _twin(kind) {
+        (host != nil) ifTrue { return host _twin(kind) }
+        t = PlotAxes new(figure, cell)
+        t host = self
+        t twinKind = kind
+        t gridOn = false
+        twins append(t)
+        figure axesList append(t)
+        t
+    }
+
+    // This axes and its twins (or its host and the host's twins)
+    _group() { (host != nil) ifTrue { host _group } ifFalse { [self] + twins } }
+
+    // A twin's share of its host's view: the shared axis's range, scale and direction
+    _share(hv) {
+        (twinKind == "x") ifTrue { self xLog = host xLog } ifFalse { self yLog = host yLog; self yInverted = host yInverted }
+        v = _view
+        self view = (twinKind == "x") ifTrue { [hv at(0), hv at(1), v at(2), v at(3)] } ifFalse { [v at(0), v at(1), hv at(2), hv at(3)] }
+    }
+
     // ---- labels and settings --------------------------------------------
 
     title(s, opts = nil) { self titleText = s; self titleOpts = opts ?? #{}; self }
@@ -455,6 +543,7 @@ PlotAxes = Object clone {
     // xlim(lo, hi) or xlim([lo, hi]) sets the x range (nil keeps that end
     // automatic); xlim() returns the range in use, [lo, hi]
     xlim(lo = nil, hi = nil) {
+        (twinKind == "x") ifTrue { return host xlim(lo, hi) }
         ((lo == nil) && (hi == nil)) ifTrue { v = _view; return [_untx(v at(0), xLog), _untx(v at(1), xLog)] }
         (lo type == "Array") ifTrue { hi = lo at(1); lo = lo at(0) }
         self xlimits = [lo, hi]
@@ -462,6 +551,7 @@ PlotAxes = Object clone {
     }
 
     ylim(lo = nil, hi = nil) {
+        (twinKind == "y") ifTrue { return host ylim(lo, hi) }
         ((lo == nil) && (hi == nil)) ifTrue { v = _view; return [_untx(v at(2), yLog), _untx(v at(3), yLog)] }
         (lo type == "Array") ifTrue { hi = lo at(1); lo = lo at(0) }
         self ylimits = [lo, hi]
@@ -490,7 +580,11 @@ PlotAxes = Object clone {
         (a type == "Dict") ifTrue { opts = a }
         (b type == "Dict") ifTrue { opts = b }
         (a type == "Array") ifTrue {
-            named = artists filter { |x| x get("kind") != "text" && x get("kind") != "image" }
+            named = []
+            _group each { |ax| ax artists each { |x|
+                k = x get("kind")
+                ((k != "text") && (k != "annotation") && (k != "image")) ifTrue { named append(x) }
+            } }
             (a size) times { |i| (i < named size) ifTrue { named at(i) set("label", a at(i)) } }
         }
         self legendOpts = opts
@@ -509,11 +603,23 @@ PlotAxes = Object clone {
         raise("Plot: axis takes \"off\", \"on\", \"equal\", \"auto\", \"tight\" or [x0, x1, y0, y1]")
     }
 
-    invertYaxis() { self yInverted = yInverted not; self }
+    invertYaxis() {
+        (twinKind == "y") ifTrue { host invertYaxis; return self }
+        self yInverted = yInverted not
+        self
+    }
 
     // xscale("log") or xscale("linear"); yscale likewise
-    xscale(kind) { self xLog = _scale(kind); self }
-    yscale(kind) { self yLog = _scale(kind); self }
+    xscale(kind) {
+        (twinKind == "x") ifTrue { host xscale(kind); return self }
+        self xLog = _scale(kind)
+        self
+    }
+    yscale(kind) {
+        (twinKind == "y") ifTrue { host yscale(kind); return self }
+        self yLog = _scale(kind)
+        self
+    }
 
     _scale(kind) {
         (kind == "log") ifTrue { return true }
@@ -568,9 +674,46 @@ PlotAxes = Object clone {
             ((labs size > 0) && (xt get("rotation") == 0)) ifTrue { right = _tickWidth(cv, labs last, fs) / 2 }
             (yt get("labels") size > 0) ifTrue { top = fs / 2 }
         }
-        (titleText != nil) ifTrue { top = (_titleSize * 1.25) + _pt(6) }
         (colorbarArtist != nil) ifTrue { right = _colorbarWidth(cv, h) }
+        // twins: their axes go on the right (twinx) or along the top (twiny)
+        twins each { |t|
+            t _share(view)
+            t _computeTicks(cv, w, h)
+            room = t _twinRoom(cv)
+            (t twinKind == "x") ifTrue { right = Math max(right, room) } ifFalse { top = Math max(top, room) }
+        }
+        ta = _titleAxes
+        (ta != nil) ifTrue { top = _twinTop(cv) + (ta _titleSize * 1.25) + _pt(6) }
         [left, top, right, bottom]
+    }
+
+    // The room a twin's own axis takes beside the plot box, in pixels
+    _twinRoom(cv) {
+        axisVisible ifFalse { return 0 }
+        tl = _pt(3.5)
+        pad = _pt(3.5)
+        fs = _pt(_rc("xtick.labelsize"))
+        (twinKind == "x") ifTrue {
+            ywid = yt get("labels") reduce(0) { |m, s| Math max(m, _tickWidth(cv, s, fs)) }
+            room = tl + pad + ywid
+            (ylabelText != nil) ifTrue { room = room + (_pt(_rc("axes.labelsize")) * 1.2) + _pt(4) }
+            return room
+        }
+        room = tl + pad + _xLabelHeight(cv, fs)
+        (xlabelText != nil) ifTrue { room = room + (_pt(_rc("axes.labelsize")) * 1.25) + _pt(4) }
+        room
+    }
+
+    // The room twiny axes take above the plot box
+    _twinTop(cv) {
+        twins reduce(0) { |m, t| (t twinKind == "y") ifTrue { Math max(m, t _twinRoom(cv)) } ifFalse { m } }
+    }
+
+    // The axes whose title is shown over the box: this one's, or a twin's
+    // (Plot title after Plot twinx sets the twin's)
+    _titleAxes() {
+        (titleText != nil) ifTrue { return self }
+        twins find { |t| t titleText != nil }
     }
 
     // Place the plot box (the figure has worked out the margins)
@@ -606,6 +749,7 @@ PlotAxes = Object clone {
             self oy = (y + h) - (v at(2) * sy)
         }
         _computeTicks(cv, w, h)
+        twins each { |t| t _place(cv, plotBox) }
     }
 
     // Data to pixels. On a log axis, values at or below zero land far
@@ -629,22 +773,35 @@ PlotAxes = Object clone {
             fc = _rc("axes.facecolor")
             (fc != nil && fc != "white" && fc != "#ffffff") ifTrue { cv rect(bx, by, bw, bh, #{fill: PlotColor hex(fc)}) }
         }
-        (gridOn && axisVisible) ifTrue { _drawGrid(cv) }
+        // twins are drawn here with their host, over the same box
+        group = _group
+        group each { |ax| (ax gridOn && ax axisVisible) ifTrue { ax _drawGrid(cv) } }
         cv clip(bx, by, bw, bh)
-        [0, 1, 2] each { |z|
-            artists each { |art| (_zorder(art) == z) ifTrue { _drawArtist(cv, art) } }
+        group each { |ax|
+            [0, 1, 2] each { |z|
+                ax artists each { |art| (ax _zorder(art) == z) ifTrue { ax _drawArtist(cv, art) } }
+            }
         }
         cv unclip
-        artists each { |art| (art get("kind") == "text") ifTrue { _drawText(cv, art) } }
+        group each { |ax|
+            ax artists each { |art|
+                k = art get("kind")
+                (k == "text") ifTrue { ax _drawText(cv, art) }
+                (k == "annotation") ifTrue { ax _drawAnnotation(cv, art) }
+            }
+        }
         axisVisible ifTrue { _drawAxis(cv) }
-        (titleText != nil) ifTrue {
-            loc = titleOpts get("loc") ?? "center"
+        twins each { |t| t axisVisible ifTrue { t _drawTwinAxis(cv) } }
+        ta = _titleAxes
+        (ta != nil) ifTrue {
+            topts = ta titleOpts ?? #{}
+            loc = topts get("loc") ?? "center"
             tx = (loc == "left") ifTrue { bx } ifFalse { (loc == "right") ifTrue { bx + bw } ifFalse { bx + (bw / 2) } }
             anchor = (loc == "left") ifTrue { "start" } ifFalse { (loc == "right") ifTrue { "end" } ifFalse { "middle" } }
-            cv text(tx, by - _pt(6), titleText, #{size: _titleSize, anchor: anchor, valign: "bottom",
-                                                  color: PlotColor hex(titleOpts get("color") ?? "k")})
+            cv text(tx, by - _pt(6) - _twinTop(cv), ta titleText, #{size: ta _titleSize, anchor: anchor, valign: "bottom",
+                                                                   color: PlotColor hex(topts get("color") ?? "k")})
         }
-        (legendOpts != nil) ifTrue { _drawLegend(cv) }
+        group each { |ax| (ax legendOpts != nil) ifTrue { ax _drawLegend(cv) } }
         (colorbarArtist != nil) ifTrue { _drawColorbar(cv) }
     }
 
@@ -927,9 +1084,128 @@ PlotAxes = Object clone {
                                          valign: valign, rotate: art get("rotation"), weight: art get("weight")})
     }
 
+    // An annotation: an arrow from the text (from the edge of its box) to
+    // xy, then the box, then the text
+    _drawAnnotation(cv, art) {
+        p = _coordsAt(art get("xy"), art get("xycoords"), nil)
+        q = _coordsAt(art get("xytext"), art get("textcoords"), p)
+        fs = _pt(art get("fontsize"))
+        s = art get("text")
+        ha = art get("ha")
+        anchor = (ha == "center") ifTrue { "middle" } ifFalse { (ha == "right") ifTrue { "end" } ifFalse { "start" } }
+        va = art get("va")
+        valign = (va == "center") ifTrue { "center" } ifFalse { (va == "top") ifTrue { "top" } ifFalse { (va == "bottom") ifTrue { "bottom" } ifFalse { "baseline" } } }
+        w = cv measure(s, fs)
+        left = (anchor == "middle") ifTrue { q at(0) - (w / 2) } ifFalse { (anchor == "end") ifTrue { q at(0) - w } ifFalse { q at(0) } }
+        // a line of text spans 0.76 of its size above the baseline, 0.24 below
+        top = (q at(1) + PlotSvg _baselineShift(valign, fs)) - (fs * 0.76)
+        box = [left, top, w, fs]
+        bb = art get("bbox")
+        (bb != nil) ifTrue {
+            pad = _pt(bb get("pad") ?? (art get("fontsize") * 0.3))
+            box = [left - pad, top - pad, w + (pad * 2), fs + (pad * 2)]
+        }
+        (art get("arrow") != nil) ifTrue { _drawArrow(cv, box, p, art get("arrow"), fs) }
+        (bb != nil) ifTrue {
+            cv rect(box at(0), box at(1), box at(2), box at(3),
+                    #{fill: bb get("fill"), stroke: bb get("stroke"), width: _pt(bb get("linewidth")), alpha: bb get("alpha")})
+        }
+        cv text(q at(0), q at(1), s, #{size: fs, color: art get("color"), anchor: anchor, valign: valign, weight: art get("weight")})
+    }
+
+    // An arrow from the edge of box (pixels [x, y, w, h]) towards the point
+    // p, its heads sized by the text's size fs as matplotlib's are
+    _drawArrow(cv, box, p, ap, fs) {
+        cx = box at(0) + (box at(2) / 2)
+        cy = box at(1) + (box at(3) / 2)
+        dx = p at(0) - cx
+        dy = p at(1) - cy
+        len = Math sqrt((dx * dx) + (dy * dy))
+        (len < 1) ifTrue { return nil }
+        // where the line leaves the box (and shrinkA beyond it), as a
+        // fraction of the way from the box's centre to p
+        hw = (box at(2) / 2) + _pt(ap get("shrinkA"))
+        hh = (box at(3) / 2) + _pt(ap get("shrinkA"))
+        tx = (dx abs > 0.001) ifTrue { hw / dx abs } ifFalse { 1000000.0 }
+        ty = (dy abs > 0.001) ifTrue { hh / dy abs } ifFalse { 1000000.0 }
+        t0 = Math min(tx, ty)
+        t1 = 1 - (_pt(ap get("shrinkB")) / len)
+        f = ap get("shrink")
+        (f != nil) ifTrue { t0 = t0 + f; t1 = t1 - f }
+        (t0 >= t1) ifTrue { return nil }       // the point is under the text
+        x0 = cx + (dx * t0)
+        y0 = cy + (dy * t0)
+        x1 = cx + (dx * t1)
+        y1 = cy + (dy * t1)
+        ux = dx / len
+        uy = dy / len
+        seg = (t1 - t0) * len
+        hl = Math min(fs * 0.4, seg * 0.45)
+        hw2 = hl / 2
+        color = ap get("color")
+        lw = _pt(ap get("linewidth"))
+        alpha = ap get("alpha")
+        // the line stops at the base of a filled head, so its end can't show past the tip
+        la = (ap get("headA") == "filled") ifTrue { hl } ifFalse { 0 }
+        lb = (ap get("headB") == "filled") ifTrue { hl } ifFalse { 0 }
+        cv line(x0 + (ux * la), y0 + (uy * la), x1 - (ux * lb), y1 - (uy * lb),
+                #{stroke: color, width: lw, dash: _dash(ap get("linestyle"), lw), alpha: alpha})
+        (ap get("headB") != nil) ifTrue { _arrowHead(cv, x1, y1, ux, uy, ap get("headB"), hl, hw2, color, lw, alpha) }
+        (ap get("headA") != nil) ifTrue { _arrowHead(cv, x0, y0, 0 - ux, 0 - uy, ap get("headA"), hl, hw2, color, lw, alpha) }
+    }
+
+    // An arrow head with its tip at tx, ty pointing along ux, uy: a filled
+    // triangle, or two open strokes
+    _arrowHead(cv, tx, ty, ux, uy, kind, l, w, color, lw, alpha) {
+        bx = tx - (ux * l)
+        by = ty - (uy * l)
+        nx = 0 - (uy * w)
+        ny = ux * w
+        (kind == "filled") ifTrue {
+            return cv polygon([tx, bx + nx, bx - nx], [ty, by + ny, by - ny], #{fill: color, stroke: color, width: lw * 0.5, alpha: alpha})
+        }
+        cv polyline([bx + nx, tx, bx - nx], [by + ny, ty, by - ny], #{stroke: color, width: lw, alpha: alpha, join: "miter", cap: "butt"})
+    }
+
+    // A point [a, b] in the given coordinates as pixels; "offset points"
+    // are from base (pixels)
+    _coordsAt(xy, coords, base) {
+        a = xy at(0)
+        b = xy at(1)
+        (coords == "data") ifTrue { return [_px(a), _py(b)] }
+        (coords == "axes fraction") ifTrue {
+            bx = plotBox
+            return [bx at(0) + (a * bx at(2)), (bx at(1) + bx at(3)) - (b * bx at(3))]
+        }
+        (coords == "figure fraction") ifTrue { return [a * figure width, (1 - b) * figure height] }
+        [base at(0) + _pt(a), base at(1) - _pt(b)]
+    }
+
+    // annotate's coordinate names ("axes" and "figure" for short)
+    _coords(name, forText) {
+        (name == "axes") ifTrue { name = "axes fraction" }
+        (name == "figure") ifTrue { name = "figure fraction" }
+        ok = (name == "data") || (name == "axes fraction") || (name == "figure fraction") || (forText && (name == "offset points"))
+        ok ifFalse {
+            raise("Plot: annotate: unknown coordinates \"" + name toString + "\" (use \"data\", \"axes fraction\", \"figure fraction\"" +
+                  (forText ifTrue { " or \"offset points\")" } ifFalse { ")" }))
+        }
+        name
+    }
+
+    _pair(v, what) {
+        ok = (v type == "Array") && (v size == 2) && (v at(0) type == "Number") && (v at(1) type == "Number")
+        ok ifFalse { raise("Plot: annotate: " + what + " must be two numbers, [x, y]") }
+        v
+    }
+
     _drawGrid(cv) {
         o = gridOpts ?? #{}
         which = o get("axis") ?? "both"
+        // a twin's grid follows its own axis; the shared one is the host's
+        (twinKind == "x") ifTrue { which = (which == "x") ifTrue { "none" } ifFalse { "y" } }
+        (twinKind == "y") ifTrue { which = (which == "y") ifTrue { "none" } ifFalse { "x" } }
+        (which == "none") ifTrue { return nil }
         lw = _pt(o get("linewidth") ?? _rc("grid.linewidth"))
         style = #{stroke: PlotColor hex(o get("color") ?? _rc("grid.color")), width: lw,
                   dash: _dash(o get("linestyle") ?? "-", lw), alpha: o get("alpha") ?? _rc("grid.alpha")}
@@ -991,8 +1267,70 @@ PlotAxes = Object clone {
         }
     }
 
+    // A twin's own axis: ticks and labels on the right (twinx) or along the
+    // top (twiny); the host draws the frame
+    _drawTwinAxis(cv) {
+        b = plotBox
+        bx = b at(0)
+        by = b at(1)
+        bw = b at(2)
+        bh = b at(3)
+        lw = _pt(_rc("axes.linewidth"))
+        tl = _pt(3.5)
+        pad = _pt(3.5)
+        fs = _pt(_rc("xtick.labelsize"))
+        ls = _pt(_rc("axes.labelsize"))
+        tick = #{stroke: "#000000", width: lw}
+        minor = #{stroke: "#000000", width: _pt(0.6)}
+        (twinKind == "x") ifTrue {
+            right = bx + bw
+            yv = yt get("values")
+            yl = yt get("labels")
+            yv size times { |i|
+                y = _vy(yv at(i))
+                cv line(right, y, right + tl, y, tick)
+                _tickText(cv, right + tl + pad, y, yl at(i), #{size: fs, anchor: "start", valign: "center"})
+            }
+            (yt get("minor") ?? []) each { |v| y = _vy(v); cv line(right, y, right + _pt(2), y, minor) }
+            (ylabelText != nil) ifTrue {
+                ywid = yl reduce(0) { |m, s| Math max(m, _tickWidth(cv, s, fs)) }
+                cv text(right + tl + pad + ywid + _pt(4), by + (bh / 2), ylabelText, #{size: ls, anchor: "middle", valign: "top", rotate: 90})
+            }
+            return nil
+        }
+        rot = xt get("rotation")
+        xv = xt get("values")
+        xl = xt get("labels")
+        xv size times { |i|
+            x = _vx(xv at(i))
+            cv line(x, by, x, by - tl, tick)
+            (rot == 0) ifTrue {
+                _tickText(cv, x, by - tl - pad, xl at(i), #{size: fs, anchor: "middle", valign: "bottom"})
+            } ifFalse {
+                cv text(x, by - tl - pad, xl at(i), #{size: fs, anchor: "start", valign: "bottom", rotate: rot})
+            }
+        }
+        (xt get("minor") ?? []) each { |v| x = _vx(v); cv line(x, by, x, by - _pt(2), minor) }
+        (xlabelText != nil) ifTrue {
+            cv text(bx + (bw / 2), by - tl - pad - _xLabelHeight(cv, fs) - _pt(4), xlabelText, #{size: ls, anchor: "middle", valign: "bottom"})
+        }
+    }
+
+    // The artists a legend lists: the labelled ones of this axes and its twins
+    _legendEntries() {
+        out = []
+        _group each { |ax|
+            ax artists each { |a|
+                k = a get("kind")
+                ok = (a get("label") != nil) && (k != "text") && (k != "annotation") && (k != "image")
+                (ok && (a get("label") toString startsWith("_") not)) ifTrue { out append(a) }
+            }
+        }
+        out
+    }
+
     _drawLegend(cv) {
-        entries = artists filter { |a| (a get("label") != nil) && (a get("label") toString startsWith("_") not) && (a get("kind") != "text") && (a get("kind") != "image") }
+        entries = _legendEntries
         (entries size == 0) ifTrue { return nil }
         o = legendOpts
         fs = _pt(o get("fontsize") ?? _rc("legend.fontsize"))
@@ -1073,6 +1411,23 @@ PlotAxes = Object clone {
     // The legend corner covering the fewest data points (matplotlib's "best")
     _bestLoc(w, h, inset) {
         pts = []
+        _group each { |ax| ax _legendPoints(pts) }
+        best = "upper right"
+        fewest = nil
+        ["upper right", "upper left", "lower left", "lower right", "right", "center left",
+         "lower center", "upper center", "center"] each { |loc|
+            p = _legendPos(loc, w, h, inset)
+            n = 0
+            pts each { |q|
+                ((q at(0) >= p at(0)) && (q at(0) <= p at(0) + w) && (q at(1) >= p at(1)) && (q at(1) <= p at(1) + h)) ifTrue { n = n + 1 }
+            }
+            ((fewest == nil) || (n < fewest)) ifTrue { fewest = n; best = loc }
+        }
+        best
+    }
+
+    // This axes' data as pixel points (sampled), for the legend to avoid
+    _legendPoints(pts) {
         artists each { |a|
             k = a get("kind")
             (k == "line" || k == "scatter" || k == "fill") ifTrue {
@@ -1098,18 +1453,7 @@ PlotAxes = Object clone {
                 }
             }
         }
-        best = "upper right"
-        fewest = nil
-        ["upper right", "upper left", "lower left", "lower right", "right", "center left",
-         "lower center", "upper center", "center"] each { |loc|
-            p = _legendPos(loc, w, h, inset)
-            n = 0
-            pts each { |q|
-                ((q at(0) >= p at(0)) && (q at(0) <= p at(0) + w) && (q at(1) >= p at(1)) && (q at(1) <= p at(1) + h)) ifTrue { n = n + 1 }
-            }
-            ((fewest == nil) || (n < fewest)) ifTrue { fewest = n; best = loc }
-        }
-        best
+        pts
     }
 
     _colorbarWidth(cv, h) {
@@ -1213,18 +1557,21 @@ PlotAxes = Object clone {
         stickyY = []
         tight = [false, false]
         // in view units: log10 of the data on a log axis
-        incX = { |v| (_okX(v)) ifTrue {
+        // twins' data counts on the axis they share with this one only
+        useX = true
+        useY = true
+        incX = { |v| (useX && _okX(v)) ifTrue {
             t = _tx(v)
             ((lim at(0) == nil) || (t < lim at(0))) ifTrue { lim setAt(0, t) }
             ((lim at(1) == nil) || (t > lim at(1))) ifTrue { lim setAt(1, t) } } }
-        incY = { |v| (_okY(v)) ifTrue {
+        incY = { |v| (useY && _okY(v)) ifTrue {
             t = _ty(v)
             ((lim at(2) == nil) || (t < lim at(2))) ifTrue { lim setAt(2, t) }
             ((lim at(3) == nil) || (t > lim at(3))) ifTrue { lim setAt(3, t) } } }
-        artists each { |a|
+        scan = { |a|
             k = a get("kind")
-            (a get("stickyX") != nil) ifTrue { stickyX = stickyX + a get("stickyX") }
-            (a get("stickyY") != nil) ifTrue { stickyY = stickyY + a get("stickyY") }
+            (useX && (a get("stickyX") != nil)) ifTrue { stickyX = stickyX + a get("stickyX") }
+            (useY && (a get("stickyY") != nil)) ifTrue { stickyY = stickyY + a get("stickyY") }
             (k == "line" || k == "scatter") ifTrue {
                 a get("xs") each(incX)
                 a get("ys") each(incY)
@@ -1251,11 +1598,11 @@ PlotAxes = Object clone {
                     horiz ifTrue {
                         incY value(span at(0)); incY value(span at(1))
                         incX value(base); incX value(base + a get("lengths") at(i))
-                        stickyX append(base)
+                        useX ifTrue { stickyX append(base) }
                     } ifFalse {
                         incX value(span at(0)); incX value(span at(1))
                         incY value(base); incY value(base + a get("lengths") at(i))
-                        stickyY append(base)
+                        useY ifTrue { stickyY append(base) }
                     }
                 }
             }
@@ -1263,9 +1610,15 @@ PlotAxes = Object clone {
                 e = a get("extent")
                 incX value(e at(0)); incX value(e at(1))
                 incY value(e at(2)); incY value(e at(3))
-                tight setAt(0, true)
-                tight setAt(1, true)
+                useX ifTrue { tight setAt(0, true) }
+                useY ifTrue { tight setAt(1, true) }
             }
+        }
+        artists each(scan)
+        twins each { |t|
+            useX = t twinKind == "x"
+            useY = t twinKind == "y"
+            t artists each(scan)
         }
         stickyX = (stickyX filter { |v| _okX(v) }) map { |v| _tx(v) }
         stickyY = (stickyY filter { |v| _okY(v) }) map { |v| _ty(v) }
@@ -1599,6 +1952,7 @@ PlotAxes = Object clone {
     _hexOrNil(c) { ((c == nil) || (c == "none")) ifTrue { nil } ifFalse { PlotColor hex(c) } }
 
     _nextCycle() {
+        (host != nil) ifTrue { return host _nextCycle }
         c = PlotColor cycleColor(nextColor)
         self nextColor = nextColor + 1
         c

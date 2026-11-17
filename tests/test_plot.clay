@@ -254,6 +254,99 @@ Test describe("Dashboard charts") {
     }
 }
 
+Test describe("Annotations") {
+    Test it("points an arrow from the text to the point") {
+        Plot close
+        Plot plot([0, 1, 2], [0, 1, 0])
+        a = Plot annotate("top", [1, 1], [1.5, 0.5], #{arrowprops: #{}})
+        Test assertEqual(a get("kind"), "annotation")
+        Test assertEqual([a get("xycoords"), a get("textcoords")], ["data", "data"])
+        Test assertEqual(a get("arrow") get("headB"), "filled")
+        Test assertEqual(Plot ylim at(1) < 1.2, true)      // annotations don't widen the view
+        svg = Plot toSvg
+        Test assertTrue(svg contains(">top</text>"))
+        Test assertEqual(count value(svg, "<polygon"), 1)  // the arrow's head
+    }
+    Test it("takes arrow styles, other coordinates and a box") {
+        Plot close
+        Plot plot([1, 2])
+        a = Plot annotate("x", [0, 1], #{xytext: [20, -10], textcoords: "offset points",
+                                        arrowprops: #{arrowstyle: "<->"}, bbox: #{fc: "white"}})
+        Test assertEqual([a get("arrow") get("headA"), a get("arrow") get("headB")], ["open", "open"])
+        Test assertEqual(Plot annotate("y", [0.5, 0.5], #{xycoords: "axes"}) get("textcoords"), "axes fraction")
+        Test assertEqual(Plot annotate("plain", [1, 1]) get("arrow"), nil)
+        svg = Plot toSvg
+        Test assertTrue(svg contains(">plain</text>"))
+        Test assertEqual(count value(svg, "<polygon"), 0)  // open heads are lines
+        Test assertRaises({ Plot annotate("bad", [1, 1], #{xycoords: "offset points"}) })
+        Test assertRaises({ Plot annotate("bad", [1, 1], [2, 2], #{arrowprops: #{arrowstyle: "=>"}}) })
+        Test assertRaises({ Plot annotate("bad", 1) })
+        Plot close
+    }
+    Test it("stays out of the legend") {
+        Plot close
+        Plot plot([1, 2], #{label: "line"})
+        Plot annotate("note", [0, 1])
+        Plot legend(["renamed"])
+        Test assertEqual(Plot gca artists first get("label"), "renamed")
+        Test assertEqual(Plot gca _legendEntries size, 1)
+        Plot close
+    }
+}
+
+Test describe("Twin axes") {
+    Test it("shares x with a second y axis on the right") {
+        [fig, ax] = Plot subplots
+        ax plot([0, 10], [0, 1])
+        ax2 = ax twinx
+        ax2 plot([5, 20], [100, 300])
+        Test assertEqual(fig axes size, 2)
+        [lo, hi] = ax xlim
+        Test assertTrue((lo <= 0) && (hi >= 20))           // both axes' data
+        Test assertEqual(ax2 xlim, ax xlim)
+        [ylo, yhi] = ax2 ylim
+        Test assertTrue((ylo >= 50) && (yhi <= 350))       // its own y range
+        // one colour cycle: the twin's line is the second colour
+        Test assertEqual(ax2 artists first get("color"), PlotColor hex(PlotColor cycleColor(1)))
+        ax2 xlim(0, 50)
+        Test assertEqual(ax xlim, [0, 50])
+        svg = fig toSvg
+        Test assertEqual(count value(svg, "<polyline"), 2)  // each line drawn once
+        Test assertTrue(svg contains(">300</text>"))
+        Plot close
+    }
+    Test it("lists both axes' lines in one legend") {
+        Plot close
+        Plot plot([1, 2, 3], #{label: "loss"})
+        t = Plot twinx
+        Test assertEqual(Plot gca, t)
+        Plot plot([3, 2, 1], #{label: "accuracy"})
+        Plot ylabel("acc")
+        Plot title("Both")
+        Plot legend
+        svg = Plot toSvg
+        Test assertTrue(svg contains(">loss</text>"))
+        Test assertTrue(svg contains(">accuracy</text>"))
+        Test assertTrue(svg contains(">Both</text>"))
+        Test assertTrue(svg contains(">acc</text>"))
+        Plot close
+    }
+    Test it("shares y with a second x axis along the top") {
+        [fig, ax] = Plot subplots
+        ax plot([0, 1, 2], [5, 6, 7])
+        top = ax twiny
+        top xlim(32, 212)
+        top xlabel("fahrenheit")
+        Test assertEqual(top ylim, ax ylim)
+        ax yscale("log")
+        svg = fig toSvg
+        Test assertTrue(svg contains(">fahrenheit</text>"))
+        Test assertTrue(svg contains(">200</text>"))
+        Test assertEqual(top yLog, true)
+        Plot close
+    }
+}
+
 Test describe("PlotFigure") {
     Test it("returns subplots as matplotlib does") {
         [fig, ax] = Plot subplots

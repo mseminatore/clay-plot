@@ -105,6 +105,11 @@ Plot = Object clone {
     // Make an axes current
     sca(ax) { self currentAxes = ax; self current = ax figure; ax }
 
+    // A twin of the current axes, made current: twinx shares the x axis
+    // (its own y axis on the right), twiny the y axis (x along the top)
+    twinx() { self currentAxes = gca twinx; currentAxes }
+    twiny() { self currentAxes = gca twiny; currentAxes }
+
     // ---- drawing (on the current axes) -------------------------------------
 
     plot(a = nil, b = nil, c = nil, d = nil) { gca plot(a, b, c, d) }
@@ -116,6 +121,7 @@ Plot = Object clone {
     axhline(y = 0, opts = nil) { gca axhline(y, opts) }
     axvline(x = 0, opts = nil) { gca axvline(x, opts) }
     text(x, y, s, opts = nil) { gca text(x, y, s, opts) }
+    annotate(s, xy, xytext = nil, opts = nil) { gca annotate(s, xy, xytext, opts) }
     imshow(data, opts = nil) { gca imshow(data, opts) }
     colorbar(art = nil, opts = nil) { gca colorbar(art, opts) }
     step(x, y, a = nil, b = nil) { gca step(x, y, a, b) }
