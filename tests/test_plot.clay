@@ -163,6 +163,97 @@ Test describe("PlotAxes") {
     }
 }
 
+Test describe("Dashboard charts") {
+    Test it("formats numbers printf and Python style") {
+        Test assertEqual(PlotTicks printf("%1.1f%%", 52.64), "52.6%")
+        Test assertEqual(PlotTicks printf("%d", 41.6), "42")
+        Test assertEqual(PlotTicks printf("%g", 2.5), "2.5")
+        Test assertEqual(PlotTicks printf("{:.0f}%", 13.2), "13%")
+        Test assertEqual(PlotTicks printf("{:,.0f}", 1234567), "1,234,567")
+        Test assertEqual(PlotTicks printf("{:.1%}", 0.256), "25.6%")
+        Test assertEqual(PlotTicks printf("n={}", 3), "n=3")
+        Test assertEqual(PlotTicks printf({ |v| "<" + v toString + ">" }, 7), "<7>")
+    }
+    Test it("takes logarithms") {
+        Test assertEqual(Math round(PlotTicks log10(1000) * 1000), 3000)
+        Test assertEqual(Math round(PlotTicks log10(0.01) * 1000), -2000)
+        Test assertEqual(Math round(PlotTicks log10(2) * 10000), 3010)
+        Test assertEqual(PlotTicks log10(0), nil)
+    }
+    Test it("puts log ticks on decades, with minor ticks between") {
+        t = PlotTicks locateLog(0.4, 3.8, 8)
+        Test assertEqual(t get("values"), [1, 2, 3])
+        Test assertEqual(t get("labels"), ["10^1", "10^2", "10^3"])
+        Test assertEqual(t get("minor") size, 28)
+        Test assertEqual(PlotTicks locateLog(-3, 0, 8) get("labels") first, "10^" + minus + "3")
+        // less than a decade: 1, 2 and 5 times
+        Test assertEqual(PlotTicks locateLog(0.1, 0.9, 8) get("labels"), ["2", "5"])
+    }
+    Test it("scales an axis logarithmically") {
+        Plot close
+        Plot semilogy([1, 2, 3], [10, 100, 1000])
+        [lo, hi] = Plot ylim
+        Test assertTrue((lo < 10) && (lo > 5))
+        Test assertTrue((hi > 1000) && (hi < 2000))
+        Test assertTrue(Plot toSvg contains(">3</text>"))      // the raised exponent of 10^3
+        Test assertRaises({ Plot xscale("symlog") })
+    }
+    Test it("draws pies and donuts") {
+        Plot close
+        [wedges, texts, autotexts] = Plot pie([1, 1, 2], #{labels: ["a", "b", "c"], autopct: "%.0f%%", startangle: 10})
+        Test assertEqual(wedges size, 3)
+        Test assertEqual(wedges map { |w| Math round(w get("a1") - w get("a0")) }, [90, 90, 180])
+        Test assertEqual(autotexts map { |t| t get("text") }, ["25%", "25%", "50%"])
+        Test assertEqual(texts map { |t| t get("ha") }, ["left", "right", "left"])
+        Test assertEqual(wedges map { |w| w get("color") }, ["#1f77b4", "#ff7f0e", "#2ca02c"])
+        Test assertTrue(Plot toSvg contains(">50%</text>"))
+        Plot close
+        [wedges, texts, autotexts] = Plot pie([3, 1], #{wedgeprops: #{width: 0.3}, counterclock: false, startangle: 90})
+        Test assertEqual(wedges first get("r0"), 0.7)
+        Test assertEqual(Math round(wedges first get("a1")), -180)
+        Test assertRaises({ Plot pie([1, -1]) })
+    }
+    Test it("stacks areas") {
+        Plot close
+        areas = Plot stackplot([0, 1, 2], [[1, 2, 3], [10, 10, 10]], #{labels: ["a", "b"]})
+        Test assertEqual(areas size, 2)
+        Test assertEqual(areas at(1) get("y2"), [1, 2, 3])
+        Test assertEqual(areas at(1) get("y1"), [11, 12, 13])
+        // no margin at the ends or below zero
+        Test assertEqual(Plot xlim, [0, 2])
+        Test assertEqual(Plot ylim at(0), 0)
+        Plot close
+        areas = Plot stackplot([0, 1], [1, 2], [3, 4])
+        Test assertEqual(areas at(1) get("y1"), [4, 6])
+    }
+    Test it("stacks bars and labels them") {
+        Plot close
+        Plot bar(["a", "b"], [1, 2])
+        top = Plot bar(["a", "b"], [3, 4], #{bottom: [1, 2]})
+        labels = Plot barLabel(top, #{fmt: "{:.1f}"})
+        Test assertEqual(labels map { |t| t get("text") }, ["3.0", "4.0"])
+        Test assertEqual(labels map { |t| t get("y") }, [4, 6])
+        Test assertEqual(Plot ylim at(1) > 6, true)
+        mid = Plot barLabel(top, #{labelType: "center", labels: ["x", "y"]})
+        Test assertEqual(mid map { |t| [t get("text"), t get("y")] }, [["x", 2.5], ["y", 4]])
+        Test assertRaises({ Plot barLabel(Plot plot([1])) })
+    }
+    Test it("draws error bars and steps") {
+        Plot close
+        [line, bars] = Plot errorbar([1, 2], [5, 6], #{yerr: 1, capsize: 3, fmt: "o"})
+        Test assertEqual(bars get("segs"), [[1, 4, 1, 6], [2, 5, 2, 7]])
+        Test assertEqual(line get("marker"), "o")
+        Test assertEqual(bars get("color"), line get("color"))
+        [line, bars] = Plot errorbar([1, 2], [5, 6], #{xerr: [[0, 1], [2, 3]], fmt: "none"})
+        Test assertEqual(bars get("segs"), [[1, 5, 3, 5], [1, 6, 5, 6]])
+        Test assertEqual(line get("linestyle"), "none")
+        Test assertEqual(Plot ylim at(0) < 4, true)
+        s = Plot step([1, 2, 3], [1, 3, 2], #{where: "post"})
+        Test assertEqual(s get("drawstyle"), "steps-post")
+        Test assertTrue(Plot toSvg contains("<polyline"))
+    }
+}
+
 Test describe("PlotFigure") {
     Test it("returns subplots as matplotlib does") {
         [fig, ax] = Plot subplots
@@ -409,6 +500,83 @@ Test describe("PNG output") {
         Plot close
         Plot plot([1, 2])
         Test assertEqual(Plot toPng bytes slice(0, 4), [137, 80, 78, 71])
+    }
+}
+
+Test describe("Terminal output") {
+    esc = "\x1b["
+    Test it("draws lines as Braille dots") {
+        cv = PlotTerm new(4, 2, false)
+        cv line(0, 0, 7, 0, #{stroke: "#000000"})      // the top row of dots, all 4 cells
+        Test assertEqual(cv finish, "\xe2\xa0\x89\xe2\xa0\x89\xe2\xa0\x89\xe2\xa0\x89\n\n")
+        cv = PlotTerm new(2, 1, false)
+        cv line(0.5, 0, 0.5, 3.9, #{stroke: "#000000"})  // the left column of the first cell
+        Test assertEqual(cv finish, "\xe2\xa1\x87\n")
+    }
+    Test it("puts text in cells, measured two dots a character") {
+        cv = PlotTerm new(10, 1, false)
+        Test assertEqual(cv measure("ab" + minus + "1", 10), 8)
+        cv text(10, 2, "abc", #{anchor: "middle", valign: "center"})
+        Test assertEqual(cv finish, "    abc\n")
+        Test assertEqual(cv superscript(minus + "12"), "\xe2\x81\xbb\xc2\xb9\xc2\xb2")
+    }
+    Test it("fills shapes, and white fills erase") {
+        cv = PlotTerm new(2, 1, false)
+        cv rect(0, 0, 4, 4, #{fill: "#1f77b4"})
+        Test assertEqual(cv finish, "\xe2\xa3\xbf\xe2\xa3\xbf\n")
+        cv rect(2, 0, 2, 4, #{fill: "#ffffff"})
+        Test assertEqual(cv finish, "\xe2\xa3\xbf\n")
+    }
+    Test it("colours cells, leaving black and white to the terminal") {
+        cv = PlotTerm new(2, 1, true)
+        cv line(0, 0, 3, 0, #{stroke: "#ff0000"})
+        out = cv finish
+        Test assertTrue(out contains(esc + "38;2;255;0;0m"))
+        Test assertTrue(out contains(esc + "0m"))
+        cv = PlotTerm new(2, 1, true)
+        cv line(0, 0, 3, 0, #{stroke: "#000000"})
+        Test assertTrue((cv finish contains(esc)) not)
+    }
+    Test it("draws a figure in a terminal's width") {
+        Plot close
+        Plot plot([1, 2, 3], [1, 4, 9], #{label: "squares"})
+        Plot title("Growth")
+        Plot legend
+        text = Plot toText(#{cols: 60, rows: 20, color: false})
+        rows = text split("\n")
+        Test assertEqual(rows size, 21)                 // 20 and the empty end
+        Test assertTrue((rows at(0) + rows at(1)) contains("Growth"))
+        Test assertTrue(text contains("squares"))
+        Test assertTrue((text contains(esc)) not)
+        Test assertTrue((rows map { |r| PlotTerm _glyphs(r) size }) max <= 60)
+        // the figure keeps its size and dpi
+        Test assertEqual([Plot gcf width, Plot gcf height], [640, 480])
+        Test assertTrue(Plot toText(#{cols: 60, color: true}) contains(esc + "38;2;31;119;180m"))
+    }
+    Test it("writes log axes' powers with superscripts") {
+        Plot close
+        Plot semilogy([1, 2, 3], [10, 100, 1000])
+        Test assertTrue(Plot toText(#{cols: 60, rows: 16, color: false}) contains("10\xc2\xb3"))
+    }
+    Test it("draws images with half blocks, or shades without colour") {
+        Plot close
+        Plot imshow([[0, 1], [1, 0]], #{cmap: "gray"})
+        Test assertTrue(Plot toText(#{cols: 40, rows: 12, color: true}) contains("\xe2\x96\x80"))
+        Test assertTrue(Plot toText(#{cols: 40, rows: 12, color: false}) contains("\xe2\x96\x88"))
+    }
+    Test it("follows training, epoch by epoch") {
+        live = Plot liveCurve(#{terminal: true, every: 1000})
+        Test assertEqual(live value(#{"epoch": 1, "loss": 0.9, "valLoss": 1.0, "lr": 0.1}), true)
+        live value(#{"epoch": 2, "loss": 0.5, "valLoss": 0.7, "lr": 0.1})
+        Test assertEqual(live history size, 2)
+        fig = live figure
+        Test assertEqual(fig axes first titleText, "epoch 2  loss 0.5000  val 0.7000")
+        Test assertEqual((fig axes first artists filter { |a| a get("kind") == "line" }) size, 2)
+        live value(0.25)
+        Test assertEqual(live history last get("epoch"), 3)
+        // fit's history without validation has valLoss -1: no empty series
+        lines = PlotML learningCurve(PlotFigure new addSubplot(1, 1, 1), [#{"epoch": 1, "loss": 0.5, "valLoss": -1}], #{})
+        Test assertEqual(lines size, 1)
     }
 }
 

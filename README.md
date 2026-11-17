@@ -1,10 +1,11 @@
 # clay-plot
 
 Charts and figures for [Clay](https://github.com/mseminatore/clay), in the style of
-matplotlib's `pyplot`: line plots, scatter plots, bar charts, histograms, images and heatmaps,
-subplots, legends, colour bars and colormaps. Figures are saved as PNG, drawn anti-aliased
-by [clay-image](https://github.com/mseminatore/clay-image), or as SVG, which any browser shows
-and which web pages and Markdown can embed.
+matplotlib's `pyplot`: line plots, scatter plots, bar charts, histograms, pies, stacked areas,
+error bars, images and heatmaps, log scales, subplots, legends, colour bars and colormaps.
+Figures are saved as PNG, drawn anti-aliased by
+[clay-image](https://github.com/mseminatore/clay-image), or as SVG, which any browser shows
+and which web pages and Markdown can embed, or drawn in the terminal, live as a network trains.
 
 If you know matplotlib, you already know most of it: the function names, format strings
 (`"r--"`, `"o-"`), colour names (`"C1"`, `"tab:orange"`), colormaps (`"viridis"`) and
@@ -50,6 +51,10 @@ fig savefig("subplots.svg")
 | `ax.set(xlim=(0, 1), title="t")` | `ax set(#{xlim: [0, 1], title: "t"})` |
 | `plt.fill_between(x, y1, y2)` | `Plot fillBetween(x, y1, y2)` |
 | `n, bins, patches = plt.hist(x, 20)` | `[n, bins, patches] = Plot hist(x, 20)` |
+| `plt.pie(v, labels=l, autopct="%1.1f%%")` | `Plot pie(v, #{labels: l, autopct: "%1.1f%%"})` |
+| `ax.bar_label(bars, fmt="{:,.0f}")` | `ax barLabel(bars, #{fmt: "{:,.0f}"})` |
+| `plt.errorbar(x, y, yerr=e, fmt="o")` | `Plot errorbar(x, y, #{yerr: e, fmt: "o"})` |
+| `plt.yscale("log")`, `plt.semilogy(x, y)` | `Plot yscale("log")`, `Plot semilogy(x, y)` |
 | `plt.xticks(pos, labels, rotation=45)` | `Plot xticks(pos, labels, #{rotation: 45})` |
 | `plt.text(0.5, 0.5, "s", transform=ax.transAxes)` | `Plot text(0.5, 0.5, "s", #{transform: "axes"})` |
 | `plt.rcParams["font.size"] = 12` | `Plot rc set("font.size", 12)` |
@@ -75,9 +80,14 @@ return the artist they add, a Dict (`line get("color")`, `line set("label", "new
 | `barh(ys, widths, opts)` | Horizontal bars; `height` and `left` instead of `width` and `bottom`. Category labels read top to bottom. |
 | `hist(values, bins, opts)` | A histogram. `bins` is a count (10) or an Array of edges. Options: `bins`, `range: [lo, hi]`, `density`, `histtype` (`"bar"` or `"step"`), `color`, `alpha`, `label`. Returns `[counts, edges, artist]`. |
 | `fillBetween(xs, y1, y2, opts)` | Shades between two curves (`y2` is 0 if left out, or a number). `color`, `alpha`, `edgecolor`, `label`. |
+| `step(xs, ys, fmt, opts)` | A step line. `where`: `"pre"` (the default), `"post"` or `"mid"`; and `plot`'s options. |
+| `errorbar(xs, ys, opts)` | Points or a line with error bars. `yerr`, `xerr`: a number, one per point, or `[lows, highs]`; `fmt` (`"o"`, `"s--"`; `"none"` for bars only), `capsize` (points), `ecolor`, `elinewidth`, and `plot`'s options. Returns `[line, bars]`. |
 | `axhline(y, opts)`, `axvline(x, opts)` | A line across the whole axes. `color`, `linestyle`, `linewidth`, `alpha`, `label`. |
 | `text(x, y, s, opts)` | Text at data coordinates, or axes fractions with `transform: "axes"`. `fontsize`, `color`, `ha` (`"left"`, `"center"`, `"right"`), `va` (`"baseline"`, `"center"`, `"top"`, `"bottom"`), `rotation`, `fontweight`. |
 | `imshow(data, opts)` | An image or heatmap: rows of numbers (through `cmap`, scaled to `vmin`..`vmax`; `nil` and `nan` cells are transparent) or rows of `[r, g, b]` or `[r, g, b, a]` pixels (0..1, or 0..255). A flat Array needs `shape: [rows, cols]` unless it is square: 784 numbers show as 28 x 28. An `Image` from [clay-image](https://github.com/mseminatore/clay-image) works too. Options: `cmap`, `vmin`, `vmax`, `aspect` (`"equal"` or `"auto"`), `origin` (`"upper"` or `"lower"`), `extent`. |
+| `pie(values, opts)` | A pie chart (the axes become round, without a frame). `labels`, `colors`, `autopct` (`"%1.1f%%"`, `"{:.0f}%"` or a block given the percentage), `startangle` (degrees, anticlockwise from 3 o'clock), `counterclock`, `explode` (an offset per wedge), `radius`, `pctdistance` (0.6), `labeldistance` (1.1), `wedgeprops: #{width:, edgecolor:, linewidth:}` (a `width` makes a donut), `textprops: #{fontsize:, color:}`. Returns `[wedges, texts, autotexts]`; `legend` lists the wedges. |
+| `stackplot(xs, [ys1, ys2, ...], opts)` | Stacked areas, bottom first (the series may also be separate arguments). `labels`, `colors`, `alpha`, `edgecolor`, `baseline` (`"zero"` or `"sym"`). Returns the areas. |
+| `barLabel(bars, opts)` | Write values on the bars `bar`, `barh` or `hist` returned. `fmt` (`"%g"`, `"%d%%"`, `"{:,.0f}"`, or a block), `labels` (your own text instead), `labelType` (`"edge"` or `"center"`), `padding` (points), `fontsize`, `color`. |
 | `colorbar(artist, opts)` | A colour bar beside the axes for an image or a colour-mapped scatter (the last one if you leave the artist out). `label`. |
 
 ### Labels and settings
@@ -92,7 +102,8 @@ return the artist they add, a Dict (`line get("color")`, `line set("label", "new
 | `legend(opts)`, `legend(labels)` | A legend of the labelled artists. `loc`: `"best"` (the default: the corner covering the least data), `"upper right"`, `"upper left"`, `"lower left"`, `"lower right"`, `"right"`, `"center left"`, `"center right"`, `"lower center"`, `"upper center"`, `"center"`. Also `fontsize`, `title`, `framealpha`. An Array of labels names the artists in order. |
 | `axis(mode)` | `"off"` hides the frame, ticks and labels; `"equal"` makes a unit the same length on both axes; `"auto"`; `"tight"`; or `[x0, x1, y0, y1]`. |
 | `invertYaxis` | Turn the y axis upside down |
-| `set(opts)` | Several at once: `title`, `xlabel`, `ylabel`, `xlim`, `ylim`, `xticks`, `yticks`, `aspect` |
+| `xscale(kind)`, `yscale(kind)` | `"log"` or `"linear"`. Log axes are ticked at powers of ten (with minor ticks between) and leave out values at or below zero. `semilogy(...)`, `semilogx(...)` and `loglog(...)` are `plot` on log axes. |
+| `set(opts)` | Several at once: `title`, `xlabel`, `ylabel`, `xlim`, `ylim`, `xticks`, `yticks`, `xscale`, `yscale`, `aspect` |
 
 ### Figures
 
@@ -134,6 +145,30 @@ Colormaps: `viridis` (the default), `plasma`, `inferno`, `magma`, `cividis`, `gr
 `Greys`, `Blues`, `Reds`, `Greens`, `coolwarm`, `RdBu`; add `_r` to reverse one
 (`"gray_r"`). `PlotColor colormap("viridis", 0.3)` gives the `[r, g, b]` at a point, and
 `PlotColor hex(spec)` turns any colour into `"#rrggbb"`.
+
+## Dashboards
+
+Pies and donuts, stacked bars with their totals, stacked areas, error bars and log scales,
+from [`examples/dashboard.clay`](examples/dashboard.clay):
+
+```clay norun
+ax pie(shares, #{labels: ["Web", "Store", "Phone"], autopct: "%1.1f%%", startangle: 90})
+ax pie(browsers, #{autopct: "{:.0f}%", wedgeprops: #{width: 0.4, edgecolor: "white"}})   // a donut
+
+ax bar(months, web, #{label: "Web"})                       // stacked bars: bottom is the bars below
+top = ax bar(months, store, #{bottom: web, label: "Store"})
+ax barLabel(top, #{fmt: "{:,.0f}", padding: 2})
+
+ax stackplot(days, [web, store, phone], #{labels: ["Web", "Store", "Phone"]})
+ax errorbar(xs, ys, #{yerr: errs, fmt: "o", capsize: 3})
+ax yscale("log")
+```
+
+![A dashboard of charts](docs/images/dashboard.png)
+
+For grouped bars, shift each group's positions by a bar width, as in matplotlib:
+`ax bar(xs map { |x| x - 0.2 }, a, #{width: 0.4})`, `ax bar(xs map { |x| x + 0.2 }, b, #{width: 0.4})`,
+then `ax xticks(xs, names)`.
 
 ## Machine learning
 
@@ -200,6 +235,57 @@ Plot xlabel("frame"); Plot ylabel("mel band")
 
 ![A spectrogram](docs/images/spectrogram.svg)
 
+## In the terminal
+
+Any figure can be drawn as text: lines, markers and fills in Braille dots (2 x 4 to a
+character), images in half blocks, all in 24-bit colour. It suits SSH sessions and watching a
+network train.
+
+```clay
+Plot plot(epochs, train, #{label: "train"})
+Plot plot(epochs, valid, "--", #{label: "validation"})
+Plot title("Learning curve"); Plot legend
+Plot show(#{terminal: true})        // or: Plot toText(#{cols: 64, rows: 16}) print
+```
+
+```text
+
+                           Learning curve
+      ⢠⠤⠤⠤⠤⠤⠤⠤⠤⠤⠤⠤⠤⠤⠤⠤⠤⠤⠤⠤⠤⠤⠤⠤⠤⠤⠤⠤⠤⠤⠤⠤⠤⠤⠤⠤⠤⠤⠤⠤⠤⠤⠤⠤⠤⠤⠤⠤⠤⠤⠤⠤⠤⠤⠤⢤
+      ⢸  ⡇                                 ⢸⠉⠉⠉⠉⠉⠉⠉⠉⠉⠉⠉⠉⠉⠉⠉⠉⢹⢸
+  1.0 ⢸  ⣏                                 ⢸⠉⠉⠉⠉⠁ train     ⢸⢸
+      ⢸  ⢸⡆                                ⢸⠤⠤⠄⠠⠄ validation⢸⢸
+      ⢸  ⠈⣦                                ⠸⠤⠤⠤⠤⠤⠤⠤⠤⠤⠤⠤⠤⠤⠤⠤⠤⠼⢸
+      ⢸   ⢹⠄                                                 ⢸
+  0.5 ⢸   ⠈⢲⠢⡀                                               ⢸
+      ⢸     ⠑⢆⡢⠤⡀                                            ⢸
+      ⢸       ⠈⠑⠒⠬⠭⣇⣀⣒⡒ ⠠⠤⠄ ⠤⠤⠄⢀⣀⣀ ⣀⣀⡀⢀⣀⣀⢀⣀⣀⡀⣀⣀⣀⢀⣀⣀⡀⢀⣀⣀ ⣀⣀   ⢸
+      ⢸               ⠈⠉⠉⠉⠉⠉⠑⠒⠒⠒⠒⠒⠒⠒⠒⠒⠒⠒⠒⠒⠤⠤⠤⠤⠤⠤⠤⠤⠤⠤⠤⠤⠤⠤⠤⠤⠤⠄ ⢸
+      ⠈⠉⠉⠉⠉⠉⠉⠉⠉⠉⠉⠉⠉⠉⠉⠉⠉⠉⠉⠉⠉⠉⠉⠉⠉⠉⠉⠉⠉⠉⠉⠉⠉⠉⠉⠉⠉⠉⠉⠉⠉⠉⠉⠉⠉⠉⠉⠉⠉⠉⠉⠉⠉⠉⠉⠉
+       0        5       10      15       20       25      30
+
+                                epoch
+```
+
+| | |
+|---|---|
+| `toText(opts)` | The figure (`fig toText`, or `Plot toText` for the current one) as a String of lines. `cols` (the `COLUMNS` variable, or 80), `rows` (from the figure's shape, at most `LINES` - 1), `color` (`true` when writing to a terminal; `false` for plain text). |
+| `show(#{terminal: true})` | Print it rather than open a viewer. On Linux without a display (`DISPLAY` and `WAYLAND_DISPLAY` unset), `show` does this by itself. |
+| `Plot liveCurve(opts)` | A learning curve redrawn in place after every epoch: pass it as clay-ann `fit`'s `onEpoch`. Writing to a file or pipe instead, it prints a line per epoch. Options: `cols`, `rows` (20), `color`, `every` (redraw every n epochs), `title`, and `learningCurve`'s. `live savefig("loss.png")` saves the finished curve; `live history` has the epochs; `live value(loss)` adds one by hand. |
+
+```clay
+live = Plot liveCurve
+history = net fit(xTrain, yTrain, #{"epochs": 30, "validation": [xValid, yValid], "onEpoch": live})
+live savefig("history.png")
+```
+
+`examples/fashion_mnist.clay --live` shows it. Text is laid out at a size where 10-point type
+is one row, so ticks, labels, legends and colour bars come out as in the pictures, at
+character resolution. Black and white draw in the terminal's own text colour, so charts read on
+dark and light backgrounds alike. The terminal needs a font with Braille characters (Windows
+Terminal, macOS Terminal and most Linux terminals have one; the old Windows console host's
+fonts do not).
+
 ## Limitations
 
 - Text is DejaVu Sans only, in one weight (`fontweight` applies to SVG alone). SVG asks the
@@ -207,7 +293,7 @@ Plot xlabel("frame"); Plot ylabel("mel band")
   another sans-serif, which may sit a little closer or further than intended.
 - In SVG, images are embedded as base64 PNG, about a third larger than the PNG itself (a
   128 x 400 spectrogram is about 200 KB).
-- No log scales, error bars, pie charts, contour plots or 3-D yet.
+- No contour plots, twin axes, date axes, symlog scales or 3-D yet. Log axes label only powers of ten (and 1, 2, 5 when less than two decades show).
 
 ## Install
 
@@ -226,14 +312,17 @@ clay bricks install                # fetches clay-image into bricks/
 clay tests/test_plot.clay          # a brick can import itself by name
 clay examples/gallery.clay         # writes example figures to examples/out/
 clay examples/ml.clay
+clay examples/dashboard.clay
 ```
 
 `examples/fashion_mnist.clay` also needs clay-ann; its header says how to run it.
 
 The code is in `src/`: `main.clay` (`Plot`, the pyplot-style functions and `rc`),
 `figure.clay` (`PlotFigure`: layout and saving), `axes.clay` (`PlotAxes`: artists, scales,
-ticks, legend, drawing), `ticks.clay` (`PlotTicks`), `color.clay` (`PlotColor`), and the
-backends `svg.clay` (`PlotSvg`) and `png.clay` (`PlotPng`, on clay-image's `Canvas`). Axes
+ticks, legend, drawing), `ticks.clay` (`PlotTicks`: ticks, number formats, logarithms),
+`color.clay` (`PlotColor`), `ml.clay` (`PlotML`), `live.clay` (`PlotLive`), and the backends
+`svg.clay` (`PlotSvg`), `png.clay` (`PlotPng`, on clay-image's `Canvas`) and `term.clay`
+(`PlotTerm`, text for terminals). Axes
 draw through a handful of primitives (`line`, `polyline`, `polygon`, `rect`, `circle`, `text`,
 `image`, `clip`, `measure`) listed at the top of `svg.clay`, so a new backend implements just
 those.

@@ -27,6 +27,8 @@ PlotAxes = Object clone {
     integerY = false
     colorbarArtist = nil
     colorbarLabel = nil
+    xLog = false            // xscale("log")
+    yLog = false
     // worked out while drawing
     plotBox = nil           // [x, y, w, h] in pixels
     view = nil              // [x0, x1, y0, y1] in data units
@@ -246,6 +248,188 @@ PlotAxes = Object clone {
         target
     }
 
+    // A step plot: step(xs, ys, fmt, #{where: "pre" (default), "post" or
+    // "mid", and plot's options})
+    step(x, y, a = nil, b = nil) {
+        [items, fmt, opts] = _split([a, b])
+        art = _line(_seq(x), _seq(y), fmt, opts)
+        art set("drawstyle", "steps-" + (opts get("where") ?? "pre"))
+        art
+    }
+
+    // Points with error bars: errorbar(xs, ys, #{yerr:, xerr:, fmt:,
+    // capsize:, ecolor:, elinewidth:, and plot's options}). yerr and xerr
+    // are a number, one per point, or [lows, highs]; errorbar(xs, ys, yerr)
+    // works too. fmt "none" draws no line or markers. Returns [line, bars].
+    errorbar(x, y, a = nil, b = nil) {
+        opts = #{}
+        yerr = nil
+        [a, b] each { |v|
+            (v type == "Dict") ifTrue { opts = v } ifFalse { (v != nil) ifTrue { yerr = v } }
+        }
+        yerr = opts get("yerr") ?? yerr
+        xerr = opts get("xerr")
+        xs = _seq(x)
+        ys = _seq(y)
+        fmt = opts get("fmt")
+        o = _copy(opts)
+        (fmt == "none") ifTrue { fmt = nil; o set("linestyle", "none"); o set("marker", nil) }
+        line = _line(xs, ys, fmt, o)
+        artists pop
+        segs = []
+        (yerr != nil) ifTrue {
+            [lo, hi] = _errs(yerr, ys size)
+            ys size times { |i| segs append([xs at(i), ys at(i) - lo at(i), xs at(i), ys at(i) + hi at(i)]) }
+        }
+        (xerr != nil) ifTrue {
+            [lo, hi] = _errs(xerr, xs size)
+            xs size times { |i| segs append([xs at(i) - lo at(i), ys at(i), xs at(i) + hi at(i), ys at(i)]) }
+        }
+        bars = #{kind: "errbar", segs: segs, color: PlotColor hex(opts get("ecolor") ?? line get("color")),
+                 linewidth: opts get("elinewidth") ?? line get("linewidth"), capsize: opts get("capsize") ?? 0,
+                 alpha: opts get("alpha"), label: nil}
+        artists append(bars)
+        artists append(line)
+        [line, bars]
+    }
+
+    // A pie chart: pie(values, #{labels:, colors:, autopct: "%1.1f%%" (or
+    // a block given the percentage), startangle: degrees, counterclock:,
+    // explode: [offsets], radius:, pctdistance:, labeldistance:, wedgeprops:
+    // #{width: (a donut), edgecolor:, linewidth:}, textprops: #{fontsize:,
+    // color:}}). Returns [wedges, texts, autotexts], as matplotlib's.
+    pie(values, opts = nil) {
+        opts = opts ?? #{}
+        xs = _seq(values)
+        ((xs find { |v| _ok(v) not || (v < 0) }) != nil) ifTrue { raise("Plot: pie values must be numbers, none below zero") }
+        total = xs sum
+        (total <= 0) ifTrue { raise("Plot: pie needs a value above zero") }
+        labels = opts get("labels")
+        colors = opts get("colors")
+        explode = opts get("explode")
+        ccw = opts get("counterclock") ?? true
+        r = opts get("radius") ?? 1
+        wp = opts get("wedgeprops") ?? #{}
+        tp = opts get("textprops") ?? #{}
+        autopct = opts get("autopct")
+        pctd = opts get("pctdistance") ?? 0.6
+        ld = opts get("labeldistance") ?? 1.1
+        fsz = tp get("fontsize") ?? _rc("font.size")
+        tcolor = tp get("color") ?? "k"
+        r0 = (wp get("width") != nil) ifTrue { r - wp get("width") } ifFalse { 0 }
+        wedges = []
+        texts = []
+        autotexts = []
+        a = (opts get("startangle") ?? 0) toFloat
+        xs size times { |i|
+            frac = xs at(i) / total toFloat
+            sweep = ccw ifTrue { frac * 360 } ifFalse { 0 - (frac * 360) }
+            mid = ((a + (sweep / 2)) * Math pi) / 180
+            c = Math cos(mid)
+            sn = Math sin(mid)
+            off = (explode == nil) ifTrue { 0 } ifFalse { explode at(i) ?? 0 }
+            cx = off * c
+            cy = off * sn
+            color = (colors != nil) ifTrue { colors at(i % colors size) } ifFalse { _nextCycle }
+            label = (labels != nil) ifTrue { labels at(i) } ifFalse { nil }
+            w = #{kind: "wedge", cx: cx, cy: cy, r: r, r0: r0, a0: a, a1: a + sweep, value: xs at(i),
+                  color: PlotColor hex(color), edgecolor: _hexOrNil(wp get("edgecolor")),
+                  linewidth: wp get("linewidth"), alpha: wp get("alpha") ?? opts get("alpha"),
+                  label: (label == nil) ifTrue { nil } ifFalse { label toString }}
+            artists append(w)
+            wedges append(w)
+            ((label != nil) && (ld != nil)) ifTrue {
+                t = text(cx + (ld * r * c), cy + (ld * r * sn), label, #{ha: (c > 0) ifTrue { "left" } ifFalse { "right" },
+                        va: "center", fontsize: fsz, color: tcolor})
+                texts append(t)
+            }
+            (autopct != nil) ifTrue {
+                t = text(cx + (pctd * r * c), cy + (pctd * r * sn), PlotTicks printf(autopct, frac * 100),
+                         #{ha: "center", va: "center", fontsize: fsz, color: tcolor})
+                autotexts append(t)
+            }
+            a = a + sweep
+        }
+        self aspect = "equal"
+        self axisVisible = false
+        self xlimits = [-1.25 * r, 1.25 * r]
+        self ylimits = [-1.25 * r, 1.25 * r]
+        [wedges, texts, autotexts]
+    }
+
+    // A stacked area chart: stackplot(xs, [ys1, ys2, ...], #{labels:,
+    // colors:, alpha:, baseline: "zero" or "sym"}), or stackplot(xs, ys1,
+    // ys2, ..., opts). Returns the areas, bottom first.
+    stackplot(x, a = nil, b = nil, c = nil, d = nil, e = nil, f = nil, g = nil, h = nil) {
+        [items, fmt, opts] = _split([a, b, c, d, e, f, g, h])
+        series = items
+        ((items size == 1) && (items first size > 0) && (items first first type == "Array")) ifTrue { series = items first }
+        series = series map { |s| _seq(s) }
+        xs = _seq(x)
+        series each { |s| (s size != xs size) ifTrue { raise("Plot: stackplot: every series needs one value per x (" + xs size toString + ")") } }
+        labels = opts get("labels")
+        colors = opts get("colors")
+        base = xs map { |v| 0.0 }
+        (opts get("baseline") == "sym") ifTrue {
+            base = (0..(xs size - 1)) map { |i| 0 - ((series reduce(0) { |m, s| m + s at(i) }) / 2.0) }
+        }
+        out = []
+        series size times { |k|
+            s = series at(k)
+            top = (0..(xs size - 1)) map { |i| base at(i) + s at(i) }
+            color = (colors != nil) ifTrue { colors at(k % colors size) } ifFalse { _nextCycle }
+            art = #{kind: "fill", xs: xs, y1: top, y2: base, color: PlotColor hex(color), alpha: opts get("alpha"),
+                    label: (labels != nil) ifTrue { labels at(k) } ifFalse { nil },
+                    edgecolor: _hexOrNil(opts get("edgecolor")),
+                    stickyX: [xs first, xs last], stickyY: [0]}
+            artists append(art)
+            out append(art)
+            base = top
+        }
+        out
+    }
+
+    // Write each bar's value on it: barLabel(bars, #{fmt: "%g" or
+    // "{:,.0f}" or a block, labels: [...], labelType: "edge" or "center",
+    // padding: points, fontsize:, color:}), as matplotlib's bar_label.
+    // Returns the text artists.
+    barLabel(bars, opts = nil) {
+        opts = opts ?? #{}
+        (bars type == "Array") ifTrue { bars = bars at(2) }
+        ((bars type != "Dict") || (bars get("kind") != "bars")) ifTrue { raise("Plot: barLabel needs what bar, barh or hist returned") }
+        labels = opts get("labels")
+        center = opts get("labelType") == "center"
+        pad = opts get("padding") ?? 0
+        horiz = bars get("orient") == "h"
+        out = []
+        bars get("pos") size times { |i|
+            len = bars get("lengths") at(i)
+            _ok(len) ifTrue {
+                span = _barSpan(bars, i)
+                mid = (span at(0) + span at(1)) / 2.0
+                base = _nth(bars get("bottom"), i) ?? 0
+                tip = center ifTrue { base + (len / 2.0) } ifFalse { base + len }
+                s = (labels != nil) ifTrue { (labels at(i) ?? "") toString } ifFalse { PlotTicks printf(opts get("fmt") ?? "%g", len) }
+                up = len >= 0
+                o = #{fontsize: opts get("fontsize") ?? _rc("font.size"), color: opts get("color") ?? "k"}
+                t = nil
+                horiz ifTrue {
+                    o set("va", "center")
+                    o set("ha", center ifTrue { "center" } ifFalse { up ifTrue { "left" } ifFalse { "right" } })
+                    t = text(tip, mid, s, o)
+                    center ifFalse { t set("offset", [up ifTrue { pad } ifFalse { 0 - pad }, 0]) }
+                } ifFalse {
+                    o set("ha", "center")
+                    o set("va", center ifTrue { "center" } ifFalse { up ifTrue { "bottom" } ifFalse { "top" } })
+                    t = text(mid, tip, s, o)
+                    center ifFalse { t set("offset", [0, up ifTrue { pad } ifFalse { 0 - pad }]) }
+                }
+                out append(t)
+            }
+        }
+        out
+    }
+
     // ---- machine-learning plots (ml.clay) --------------------------------
 
     // Training history: what clay-ann's fit returns (a Dict per epoch), net
@@ -271,14 +455,14 @@ PlotAxes = Object clone {
     // xlim(lo, hi) or xlim([lo, hi]) sets the x range (nil keeps that end
     // automatic); xlim() returns the range in use, [lo, hi]
     xlim(lo = nil, hi = nil) {
-        ((lo == nil) && (hi == nil)) ifTrue { v = _view; return [v at(0), v at(1)] }
+        ((lo == nil) && (hi == nil)) ifTrue { v = _view; return [_untx(v at(0), xLog), _untx(v at(1), xLog)] }
         (lo type == "Array") ifTrue { hi = lo at(1); lo = lo at(0) }
         self xlimits = [lo, hi]
         self
     }
 
     ylim(lo = nil, hi = nil) {
-        ((lo == nil) && (hi == nil)) ifTrue { v = _view; return [v at(2), v at(3)] }
+        ((lo == nil) && (hi == nil)) ifTrue { v = _view; return [_untx(v at(2), yLog), _untx(v at(3), yLog)] }
         (lo type == "Array") ifTrue { hi = lo at(1); lo = lo at(0) }
         self ylimits = [lo, hi]
         self
@@ -321,11 +505,26 @@ PlotAxes = Object clone {
         (mode == "on") ifTrue { self axisVisible = true; return self }
         (mode == "equal" || mode == "image" || mode == "scaled") ifTrue { self aspect = "equal"; return self }
         (mode == "auto") ifTrue { self aspect = nil; return self }
-        (mode == "tight") ifTrue { v = _view; xlim(v at(0), v at(1)); ylim(v at(2), v at(3)); return self }
+        (mode == "tight") ifTrue { xlim(xlim); ylim(ylim); return self }
         raise("Plot: axis takes \"off\", \"on\", \"equal\", \"auto\", \"tight\" or [x0, x1, y0, y1]")
     }
 
     invertYaxis() { self yInverted = yInverted not; self }
+
+    // xscale("log") or xscale("linear"); yscale likewise
+    xscale(kind) { self xLog = _scale(kind); self }
+    yscale(kind) { self yLog = _scale(kind); self }
+
+    _scale(kind) {
+        (kind == "log") ifTrue { return true }
+        (kind == "linear") ifTrue { return false }
+        raise("Plot: scale must be \"linear\" or \"log\"")
+    }
+
+    // plot with a log y axis, a log x axis, or both
+    semilogy(a = nil, b = nil, c = nil, d = nil) { yscale("log"); plot(a, b, c, d) }
+    semilogx(a = nil, b = nil, c = nil, d = nil) { xscale("log"); plot(a, b, c, d) }
+    loglog(a = nil, b = nil, c = nil, d = nil) { xscale("log"); yscale("log"); plot(a, b, c, d) }
 
     // Several settings at once, as matplotlib's ax.set: set(#{title:, xlabel:,
     // ylabel:, xlim:, ylim:, xticks:, yticks:})
@@ -338,6 +537,8 @@ PlotAxes = Object clone {
             (k == "ylim") ifTrue { ylim(v) }
             (k == "xticks") ifTrue { xticks(v) }
             (k == "yticks") ifTrue { yticks(v) }
+            (k == "xscale") ifTrue { xscale(v) }
+            (k == "yscale") ifTrue { yscale(v) }
             (k == "aspect") ifTrue { self aspect = (v == "equal") ifTrue { "equal" } ifFalse { nil } }
         }
         self
@@ -358,13 +559,13 @@ PlotAxes = Object clone {
         right = 0
         bottom = 0
         axisVisible ifTrue {
-            ywid = yt get("labels") reduce(0) { |m, s| Math max(m, cv measure(s, fs)) }
+            ywid = yt get("labels") reduce(0) { |m, s| Math max(m, _tickWidth(cv, s, fs)) }
             left = tl + pad + ywid
             (ylabelText != nil) ifTrue { left = left + (_pt(_rc("axes.labelsize")) * 1.2) + _pt(4) }
             bottom = tl + pad + _xLabelHeight(cv, fs)
             (xlabelText != nil) ifTrue { bottom = bottom + (_pt(_rc("axes.labelsize")) * 1.25) + _pt(4) }
             labs = xt get("labels")
-            ((labs size > 0) && (xt get("rotation") == 0)) ifTrue { right = cv measure(labs last, fs) / 2 }
+            ((labs size > 0) && (xt get("rotation") == 0)) ifTrue { right = _tickWidth(cv, labs last, fs) / 2 }
             (yt get("labels") size > 0) ifTrue { top = fs / 2 }
         }
         (titleText != nil) ifTrue { top = (_titleSize * 1.25) + _pt(6) }
@@ -407,8 +608,14 @@ PlotAxes = Object clone {
         _computeTicks(cv, w, h)
     }
 
-    _px(x) { ox + (x * sx) }
-    _py(y) { oy + (y * sy) }
+    // Data to pixels. On a log axis, values at or below zero land far
+    // outside the plot box (the clip hides them), so bars still reach down.
+    _px(x) { xLog ifTrue { ox + ((PlotTicks log10(x) ?? (Math min(view at(0), view at(1)) - 30)) * sx) } ifFalse { ox + (x * sx) } }
+    _py(y) { yLog ifTrue { oy + ((PlotTicks log10(y) ?? (Math min(view at(2), view at(3)) - 30)) * sy) } ifFalse { oy + (y * sy) } }
+
+    // View units (log10 of the data on a log axis; ticks are in these) to pixels
+    _vx(t) { ox + (t * sx) }
+    _vy(t) { oy + (t * sy) }
 
     // ---- rendering ------------------------------------------------------
 
@@ -449,13 +656,15 @@ PlotAxes = Object clone {
         (k == "fill") ifTrue { return _drawFill(cv, art) }
         (k == "hline" || k == "vline") ifTrue { return _drawRefLine(cv, art) }
         (k == "image") ifTrue { return _drawImage(cv, art) }
+        (k == "wedge") ifTrue { return _drawWedge(cv, art) }
+        (k == "errbar") ifTrue { return _drawErrbar(cv, art) }
         nil
     }
 
     _zorder(art) {
         k = art get("kind")
         (k == "image") ifTrue { return 0 }
-        (k == "bars" || k == "fill") ifTrue { return 1 }
+        (k == "bars" || k == "fill" || k == "wedge") ifTrue { return 1 }
         (k == "text") ifTrue { return 3 }
         2
     }
@@ -469,20 +678,21 @@ PlotAxes = Object clone {
         alpha = art get("alpha")
         ((ls != "none") && (ls != "") && (ls != " ")) ifTrue {
             style = #{stroke: color, width: lw, dash: _dash(ls, lw), alpha: alpha, join: "round", cap: "butt"}
+            ds = art get("drawstyle")
             px = []
             py = []
             xs size times { |i|
                 x = xs at(i)
                 y = ys at(i)
-                (_ok(x) && _ok(y)) ifTrue {
+                (_okX(x) && _okY(y)) ifTrue {
                     px append(_px(x)); py append(_py(y))
                 } ifFalse {
-                    cv polyline(px, py, style)
+                    _polyline(cv, px, py, ds, style)
                     px = []
                     py = []
                 }
             }
-            cv polyline(px, py, style)
+            _polyline(cv, px, py, ds, style)
         }
         marker = art get("marker")
         ((marker != nil) && (marker != "none") && (marker != "")) ifTrue {
@@ -492,9 +702,28 @@ PlotAxes = Object clone {
             xs size times { |i|
                 x = xs at(i)
                 y = ys at(i)
-                (_ok(x) && _ok(y)) ifTrue { _marker(cv, marker, _px(x), _py(y), ms, face, edge, alpha) }
+                (_okX(x) && _okY(y)) ifTrue { _marker(cv, marker, _px(x), _py(y), ms, face, edge, alpha) }
             }
         }
+    }
+
+    // A run of points, as steps for drawstyle "steps-pre", "steps-post" or
+    // "steps-mid" (step plots)
+    _polyline(cv, px, py, ds, style) {
+        ((ds == nil) || (ds == "default") || (px size < 2)) ifTrue { return cv polyline(px, py, style) }
+        qx = [px first]
+        qy = [py first]
+        (1..(px size - 1)) each { |i|
+            (ds == "steps-pre") ifTrue { qx append(qx last); qy append(py at(i)) }
+            (ds == "steps-post") ifTrue { qx append(px at(i)); qy append(qy last) }
+            (ds == "steps-mid") ifTrue {
+                mid = (px at(i - 1) + px at(i)) / 2
+                qx append(mid); qy append(qy last)
+                qx append(mid); qy append(py at(i))
+            }
+            qx append(px at(i)); qy append(py at(i))
+        }
+        cv polyline(qx, qy, style)
     }
 
     _drawScatter(cv, art) {
@@ -515,7 +744,7 @@ PlotAxes = Object clone {
         xs size times { |i|
             x = xs at(i)
             y = ys at(i)
-            (_ok(x) && _ok(y)) ifTrue {
+            (_okX(x) && _okY(y)) ifTrue {
                 s = (sizes type == "Array") ifTrue { sizes at(i) } ifFalse { sizes }
                 color = one
                 (values != nil) ifTrue {
@@ -572,6 +801,60 @@ PlotAxes = Object clone {
         }
         edge = art get("edgecolor")
         cv polygon(px, py, #{fill: art get("color"), alpha: art get("alpha"), stroke: edge, width: (edge != nil) ifTrue { _pt(1) } ifFalse { nil }})
+    }
+
+    // A pie wedge: an arc from a0 to a1 degrees (anticlockwise from east)
+    // around cx, cy, closed through the centre or along an inner arc (donuts)
+    _drawWedge(cv, art) {
+        cx = art get("cx")
+        cy = art get("cy")
+        r = art get("r")
+        r0 = art get("r0")
+        a0 = art get("a0")
+        a1 = art get("a1")
+        sweep = a1 - a0
+        steps = Math max(2, Math ceil(sweep abs / 2) toInt)
+        px = []
+        py = []
+        arc = { |rad, from, to|
+            (0..steps) each { |i|
+                ang = ((from + (((to - from) * i) / steps)) * Math pi) / 180
+                px append(_px(cx + (rad * Math cos(ang)))); py append(_py(cy + (rad * Math sin(ang))))
+            }
+        }
+        arc value(r, a0, a1)
+        (r0 > 0) ifTrue { arc value(r0, a1, a0) } ifFalse {
+            (sweep abs < 359.99) ifTrue { px append(_px(cx)); py append(_py(cy)) }
+        }
+        edge = art get("edgecolor")
+        cv polygon(px, py, #{fill: art get("color"), alpha: art get("alpha"), stroke: edge,
+                             width: (edge != nil) ifTrue { _pt(art get("linewidth") ?? 1) } ifFalse { nil }, join: "round"})
+    }
+
+    // Error bars: segments [x0, y0, x1, y1] in data units, with caps
+    _drawErrbar(cv, art) {
+        lw = _pt(art get("linewidth"))
+        style = #{stroke: art get("color"), width: lw, alpha: art get("alpha")}
+        cap = _pt(art get("capsize")) / 2
+        art get("segs") each { |s|
+            ok = _okX(s at(0)) && _okY(s at(1)) && _okX(s at(2)) && _okY(s at(3))
+            ok ifTrue {
+                x0 = _px(s at(0))
+                y0 = _py(s at(1))
+                x1 = _px(s at(2))
+                y1 = _py(s at(3))
+                cv line(x0, y0, x1, y1, style)
+                (cap > 0) ifTrue {
+                    (s at(0) == s at(2)) ifTrue {
+                        cv line(x0 - cap, y0, x0 + cap, y0, style)
+                        cv line(x1 - cap, y1, x1 + cap, y1, style)
+                    } ifFalse {
+                        cv line(x0, y0 - cap, x0, y0 + cap, style)
+                        cv line(x1, y1 - cap, x1, y1 + cap, style)
+                    }
+                }
+            }
+        }
     }
 
     _drawRefLine(cv, art) {
@@ -631,6 +914,11 @@ PlotAxes = Object clone {
             px = _px(x)
             py = _py(y)
         }
+        off = art get("offset")
+        (off != nil) ifTrue {
+            px = px + _pt(off at(0))
+            py = py - _pt(off at(1))
+        }
         ha = art get("ha")
         anchor = (ha == "center") ifTrue { "middle" } ifFalse { (ha == "right") ifTrue { "end" } ifFalse { "start" } }
         va = art get("va")
@@ -647,10 +935,10 @@ PlotAxes = Object clone {
                   dash: _dash(o get("linestyle") ?? "-", lw), alpha: o get("alpha") ?? _rc("grid.alpha")}
         b = plotBox
         (which != "y") ifTrue {
-            xt get("values") each { |v| x = _px(v); cv line(x, b at(1), x, b at(1) + b at(3), style) }
+            xt get("values") each { |v| x = _vx(v); cv line(x, b at(1), x, b at(1) + b at(3), style) }
         }
         (which != "x") ifTrue {
-            yt get("values") each { |v| y = _py(v); cv line(b at(0), y, b at(0) + b at(2), y, style) }
+            yt get("values") each { |v| y = _vy(v); cv line(b at(0), y, b at(0) + b at(2), y, style) }
         }
     }
 
@@ -674,10 +962,10 @@ PlotAxes = Object clone {
         xv = xt get("values")
         xl = xt get("labels")
         xv size times { |i|
-            x = _px(xv at(i))
+            x = _vx(xv at(i))
             cv line(x, by + bh, x, by + bh + tl, tick)
             (rot == 0) ifTrue {
-                cv text(x, by + bh + tl + pad, xl at(i), #{size: fs, anchor: "middle", valign: "top"})
+                _tickText(cv, x, by + bh + tl + pad, xl at(i), #{size: fs, anchor: "middle", valign: "top"})
             } ifFalse {
                 cv text(x, by + bh + tl + pad, xl at(i), #{size: fs, anchor: "end", valign: "top", rotate: rot})
             }
@@ -685,16 +973,20 @@ PlotAxes = Object clone {
         yv = yt get("values")
         yl = yt get("labels")
         yv size times { |i|
-            y = _py(yv at(i))
+            y = _vy(yv at(i))
             cv line(bx - tl, y, bx, y, tick)
-            cv text(bx - tl - pad, y, yl at(i), #{size: fs, anchor: "end", valign: "center"})
+            _tickText(cv, bx - tl - pad, y, yl at(i), #{size: fs, anchor: "end", valign: "center"})
         }
+        // minor ticks (log axes)
+        minor = #{stroke: "#000000", width: _pt(0.6)}
+        (xt get("minor") ?? []) each { |v| x = _vx(v); cv line(x, by + bh, x, by + bh + _pt(2), minor) }
+        (yt get("minor") ?? []) each { |v| y = _vy(v); cv line(bx - _pt(2), y, bx, y, minor) }
         ls = _pt(_rc("axes.labelsize"))
         (xlabelText != nil) ifTrue {
             cv text(bx + (bw / 2), by + bh + tl + pad + _xLabelHeight(cv, fs) + _pt(4), xlabelText, #{size: ls, anchor: "middle", valign: "top"})
         }
         (ylabelText != nil) ifTrue {
-            ywid = yl reduce(0) { |m, s| Math max(m, cv measure(s, fs)) }
+            ywid = yl reduce(0) { |m, s| Math max(m, _tickWidth(cv, s, fs)) }
             cv text(bx - tl - pad - ywid - _pt(4), by + (bh / 2), ylabelText, #{size: ls, anchor: "middle", valign: "bottom", rotate: 90})
         }
     }
@@ -749,7 +1041,7 @@ PlotAxes = Object clone {
                 (s type == "Array") ifTrue { s = Math pow(_rc("lines.markersize"), 2) }
                 _marker(cv, a get("marker"), hx + (handle / 2), y, _pt(Math sqrt(s)), c, a get("edgecolor") ?? c, a get("alpha"))
             }
-            (k == "bars" || k == "fill") ifTrue {
+            (k == "bars" || k == "fill" || k == "wedge") ifTrue {
                 fill = (a get("colors") != nil) ifTrue { a get("colors") first } ifFalse { a get("color") }
                 cv rect(hx, y - (fs * 0.35), handle, fs * 0.7, #{fill: fill, alpha: a get("alpha"), stroke: a get("edgecolor"), width: _pt(1)})
             }
@@ -789,7 +1081,7 @@ PlotAxes = Object clone {
                 stride = Math max(1, xs size / 500)
                 i = 0
                 { i < xs size } whileTrue {
-                    (_ok(xs at(i)) && _ok(ys at(i))) ifTrue { pts append([_px(xs at(i)), _py(ys at(i))]) }
+                    (_okX(xs at(i)) && _okY(ys at(i))) ifTrue { pts append([_px(xs at(i)), _py(ys at(i))]) }
                     i = i + stride
                 }
             }
@@ -920,18 +1212,29 @@ PlotAxes = Object clone {
         stickyX = []
         stickyY = []
         tight = [false, false]
-        incX = { |v| (_ok(v)) ifTrue {
-            ((lim at(0) == nil) || (v < lim at(0))) ifTrue { lim setAt(0, v) }
-            ((lim at(1) == nil) || (v > lim at(1))) ifTrue { lim setAt(1, v) } } }
-        incY = { |v| (_ok(v)) ifTrue {
-            ((lim at(2) == nil) || (v < lim at(2))) ifTrue { lim setAt(2, v) }
-            ((lim at(3) == nil) || (v > lim at(3))) ifTrue { lim setAt(3, v) } } }
+        // in view units: log10 of the data on a log axis
+        incX = { |v| (_okX(v)) ifTrue {
+            t = _tx(v)
+            ((lim at(0) == nil) || (t < lim at(0))) ifTrue { lim setAt(0, t) }
+            ((lim at(1) == nil) || (t > lim at(1))) ifTrue { lim setAt(1, t) } } }
+        incY = { |v| (_okY(v)) ifTrue {
+            t = _ty(v)
+            ((lim at(2) == nil) || (t < lim at(2))) ifTrue { lim setAt(2, t) }
+            ((lim at(3) == nil) || (t > lim at(3))) ifTrue { lim setAt(3, t) } } }
         artists each { |a|
             k = a get("kind")
+            (a get("stickyX") != nil) ifTrue { stickyX = stickyX + a get("stickyX") }
+            (a get("stickyY") != nil) ifTrue { stickyY = stickyY + a get("stickyY") }
             (k == "line" || k == "scatter") ifTrue {
                 a get("xs") each(incX)
                 a get("ys") each(incY)
-                (a get("stickyY") != nil) ifTrue { stickyY = stickyY + a get("stickyY") }
+            }
+            (k == "errbar") ifTrue {
+                a get("segs") each { |s| incX value(s at(0)); incX value(s at(2)); incY value(s at(1)); incY value(s at(3)) }
+            }
+            (k == "wedge") ifTrue {
+                incX value(a get("cx") - a get("r")); incX value(a get("cx") + a get("r"))
+                incY value(a get("cy") - a get("r")); incY value(a get("cy") + a get("r"))
             }
             (k == "fill") ifTrue {
                 a get("xs") each(incX)
@@ -964,15 +1267,17 @@ PlotAxes = Object clone {
                 tight setAt(1, true)
             }
         }
+        stickyX = (stickyX filter { |v| _okX(v) }) map { |v| _tx(v) }
+        stickyY = (stickyY filter { |v| _okY(v) }) map { |v| _ty(v) }
         xs = _expand(lim at(0), lim at(1), tight at(0), stickyX, _rc("axes.xmargin"))
         ys = _expand(lim at(2), lim at(3), tight at(1), stickyY, _rc("axes.ymargin"))
         (xlimits != nil) ifTrue {
-            (xlimits at(0) != nil) ifTrue { xs setAt(0, xlimits at(0)) }
-            (xlimits at(1) != nil) ifTrue { xs setAt(1, xlimits at(1)) }
+            (_okX(xlimits at(0))) ifTrue { xs setAt(0, _tx(xlimits at(0))) }
+            (_okX(xlimits at(1))) ifTrue { xs setAt(1, _tx(xlimits at(1))) }
         }
         (ylimits != nil) ifTrue {
-            (ylimits at(0) != nil) ifTrue { ys setAt(0, ylimits at(0)) }
-            (ylimits at(1) != nil) ifTrue { ys setAt(1, ylimits at(1)) }
+            (_okY(ylimits at(0))) ifTrue { ys setAt(0, _ty(ylimits at(0))) }
+            (_okY(ylimits at(1))) ifTrue { ys setAt(1, _ty(ylimits at(1))) }
         }
         (xs at(0) == xs at(1)) ifTrue { xs setAt(1, xs at(0) + 1) }
         (ys at(0) == ys at(1)) ifTrue { ys setAt(1, ys at(0) + 1) }
@@ -1000,11 +1305,12 @@ PlotAxes = Object clone {
 
     _computeTicks(cv, w, h) {
         v = view
-        self xt = _axisTicks(cv, xtickSpec, v at(0), v at(1), w, true, integerX)
-        self yt = _axisTicks(cv, ytickSpec, v at(2), v at(3), h, false, integerY)
+        self xt = _axisTicks(cv, xtickSpec, v at(0), v at(1), w, true, integerX, xLog)
+        self yt = _axisTicks(cv, ytickSpec, v at(2), v at(3), h, false, integerY, yLog)
     }
 
-    _axisTicks(cv, spec, lo, hi, length, isX, integer) {
+    // Ticks in view units (lo and hi are too)
+    _axisTicks(cv, spec, lo, hi, length, isX, integer, log) {
         a = Math min(lo, hi)
         b = Math max(lo, hi)
         tol = (b - a) * 0.0001
@@ -1017,13 +1323,21 @@ PlotAxes = Object clone {
             keepL = []
             vals size times { |i|
                 x = vals at(i)
-                ((x >= a - tol) && (x <= b + tol)) ifTrue { keepV append(x); keepL append((labs at(i) ?? "") toString) }
+                ((log not) || (_ok(x) && (x > 0))) ifTrue {
+                    t = log ifTrue { PlotTicks log10(x) } ifFalse { x }
+                    ((t >= a - tol) && (t <= b + tol)) ifTrue { keepV append(t); keepL append((labs at(i) ?? "") toString) }
+                }
             }
             return #{values: keepV, labels: keepL, rotation: rot}
         }
         fs = _pt(_rc("xtick.labelsize"))
         n = isX ifTrue { (length / (fs * 3.2)) toInt } ifFalse { (length / (fs * 2.2)) toInt }
         n = n clamp(1, 9)
+        log ifTrue {
+            t = PlotTicks locateLog(a, b, n)
+            t set("rotation", rot)
+            return t
+        }
         t = nil
         labs = nil
         tries = 0
@@ -1032,7 +1346,7 @@ PlotAxes = Object clone {
             labs = PlotTicks labels(t get("values"), t get("decimals"))
             fits = true
             (isX && (rot == 0)) ifTrue {
-                widest = labs reduce(0) { |m, s| Math max(m, cv measure(s, fs)) }
+                widest = labs reduce(0) { |m, s| Math max(m, _tickWidth(cv, s, fs)) }
                 fits = ((widest + fs) * labs size) <= (length * 1.1)
             }
             (fits || (n <= 1)) ifTrue { break }
@@ -1042,9 +1356,34 @@ PlotAxes = Object clone {
         #{values: t get("values"), labels: labs, rotation: rot}
     }
 
+    // Tick labels may be "10^k" (log axes): 10 with k smaller and raised
+    _tickWidth(cv, s, fs) {
+        i = s indexOf("^")
+        (i < 0) ifTrue { return cv measure(s, fs) }
+        (cv hasMethod("superscript")) ifTrue { return cv measure(s slice(0, i) + cv superscript(s slice(i + 1, s length)), fs) }
+        cv measure(s slice(0, i), fs) + cv measure(s slice(i + 1, s length), fs * 0.7)
+    }
+
+    _tickText(cv, x, y, s, opts) {
+        i = s indexOf("^")
+        (i < 0) ifTrue { return cv text(x, y, s, opts) }
+        (cv hasMethod("superscript")) ifTrue { return cv text(x, y, s slice(0, i) + cv superscript(s slice(i + 1, s length)), opts) }
+        fs = opts get("size")
+        base = s slice(0, i)
+        sup = s slice(i + 1, s length)
+        w = _tickWidth(cv, s, fs)
+        anchor = opts get("anchor")
+        left = (anchor == "middle") ifTrue { x - (w / 2) } ifFalse { (anchor == "end") ifTrue { x - w } ifFalse { x } }
+        valign = opts get("valign")
+        // raised exponents need room above: drop top-aligned labels a little
+        y0 = (valign == "top") ifTrue { y + (fs * 0.3) } ifFalse { y }
+        cv text(left, y0, base, #{size: fs, anchor: "start", valign: valign})
+        cv text(left + cv measure(base, fs), y0 - (fs * 0.4), sup, #{size: fs * 0.7, anchor: "start", valign: valign})
+    }
+
     _xLabelHeight(cv, fs) {
         rot = xt get("rotation")
-        (rot == 0) ifTrue { return fs }
+        (rot == 0) ifTrue { return xLog ifTrue { fs * 1.3 } ifFalse { fs } }
         widest = xt get("labels") reduce(0) { |m, s| Math max(m, cv measure(s, fs)) }
         ang = (rot abs * Math pi) / 180
         (widest * Math sin(ang)) + (fs * Math cos(ang))
@@ -1109,7 +1448,7 @@ PlotAxes = Object clone {
     _barSpan(art, i) {
         p = art get("pos") at(i)
         w = _nth(art get("width"), i) ?? 0.8
-        (art get("align") == "edge") ifTrue { [p, p + w] } ifFalse { [p - (w / 2), p + (w / 2)] }
+        (art get("align") == "edge") ifTrue { [p, p + w] } ifFalse { [p - (w / 2.0), p + (w / 2.0)] }
     }
 
     _refLine(kind, v, opts) {
@@ -1229,6 +1568,15 @@ PlotAxes = Object clone {
         raise("Plot: expected an Array of numbers, got " + t)
     }
 
+    // Error sizes as [lows, highs]: from a number, one per point, or [lows, highs]
+    _errs(e, n) {
+        (e type == "Number") ifTrue { all = (1..n) map { |i| e }; return [all, all] }
+        e = _seq(e)
+        ((e size == 2) && (e first type == "Array")) ifTrue { return [_seq(e at(0)), _seq(e at(1))] }
+        (e size != n) ifTrue { raise("Plot: errorbar: need one error per point (" + n toString + "), or [lows, highs]") }
+        [e, e]
+    }
+
     _nth(v, i) { (v type == "Array") ifTrue { v at(i) } ifFalse { v } }
 
     _copy(d) {
@@ -1238,6 +1586,15 @@ PlotAxes = Object clone {
     }
 
     _ok(v) { (v != nil) && (v type == "Number") && (v == v) }
+
+    // usable on this axis: a number, and above zero on a log axis
+    _okX(v) { _ok(v) && (xLog not || (v > 0)) }
+    _okY(v) { _ok(v) && (yLog not || (v > 0)) }
+
+    // data to view units, and back
+    _tx(v) { xLog ifTrue { PlotTicks log10(v) } ifFalse { v } }
+    _ty(v) { yLog ifTrue { PlotTicks log10(v) } ifFalse { v } }
+    _untx(t, log) { log ifTrue { Math pow(10, t) toFloat } ifFalse { t } }
 
     _hexOrNil(c) { ((c == nil) || (c == "none")) ifTrue { nil } ifFalse { PlotColor hex(c) } }
 

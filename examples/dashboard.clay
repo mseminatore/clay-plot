@@ -1,0 +1,70 @@
+// Dashboard charts: pie and donut, stacked and labelled bars, stacked areas,
+// error bars, steps and a log scale. Writes examples/out/dashboard.png and
+// .svg. Run from the brick's directory: clay examples/dashboard.clay
+import("plot")
+
+months = ["Jan", "Feb", "Mar", "Apr", "May", "Jun"]
+web = [120, 135, 160, 150, 180, 210]
+store = [80, 85, 70, 95, 90, 100]
+phone = [30, 40, 45, 60, 75, 90]
+
+[fig, axs] = Plot subplots(3, 2, #{figsize: [11, 12]})
+
+// a pie with percentages, and a donut with a legend
+ax = axs at(0) at(0)
+ax pie([web sum, store sum, phone sum], #{labels: ["Web", "Store", "Phone"], autopct: "%1.1f%%",
+                                          startangle: 90, explode: [0.05, 0, 0]})
+ax title("Sales by channel")
+
+ax = axs at(0) at(1)
+[wedges, texts, autotexts] = ax pie([42, 27, 18, 13], #{autopct: "{:.0f}%", pctdistance: 0.78, startangle: 90,
+                                                        counterclock: false,
+                                                        wedgeprops: #{width: 0.4, edgecolor: "white", linewidth: 2},
+                                                        textprops: #{color: "white", fontsize: 9}})
+ax legend(["Chrome", "Safari", "Firefox", "Other"], #{loc: "center"})
+ax title("Browsers")
+
+// stacked bars, totals on top
+ax = axs at(1) at(0)
+ax bar(months, web, #{label: "Web"})
+below = web
+ax bar(months, store, #{bottom: below, label: "Store"})
+below = (0..5) map { |i| web at(i) + store at(i) }
+top = ax bar(months, phone, #{bottom: below, label: "Phone"})
+ax barLabel(top, #{fmt: "{:,.0f}", labels: (0..5) map { |i| (below at(i) + phone at(i)) toString }, padding: 2})
+ax ylim(0, 450)
+ax legend(#{loc: "upper left"})
+ax title("Monthly sales (stacked)")
+
+// horizontal bars with their values
+ax = axs at(1) at(1)
+langs = ["Python", "Clay", "Rust", "Go", "C"]
+bars = ax barh(langs, [68, 42, 31, 25, 18], #{color: "C2"})
+ax barLabel(bars, #{fmt: "%d%%", padding: 3})
+ax xlim(0, 80)
+ax title("Survey: would use again")
+
+// stacked areas
+ax = axs at(2) at(0)
+ax stackplot((1..6) toArray, [web, store, phone], #{labels: ["Web", "Store", "Phone"], alpha: 0.85})
+ax legend(#{loc: "upper left"})
+ax xticks((1..6) toArray, months)
+ax title("Sales (stacked areas)")
+
+// error bars, a step line and a log scale
+ax = axs at(2) at(1)
+xs = (1..8) toArray
+ys = xs map { |x| Math pow(10, x * 0.45) }
+ax errorbar(xs, ys, #{yerr: ys map { |y| y * 0.3 }, fmt: "o", capsize: 3, label: "measured"})
+ax step(xs, ys map { |y| y * 1.6 }, #{where: "mid", label: "bound"})
+ax yscale("log")
+ax grid(true, #{alpha: 0.4})
+ax legend
+ax title("Latency (log scale)")
+ax xlabel("load")
+ax ylabel("ms")
+
+fig suptitle("Dashboard")
+fig savefig("examples/out/dashboard.png")
+fig savefig("examples/out/dashboard.svg")
+"wrote examples/out/dashboard.png and .svg" println

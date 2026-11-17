@@ -123,6 +123,45 @@ PlotFigure = Object clone {
     }
 
     // Run a block with dpi set to dpiFor (if given), then put it back
+    // The figure as text for a terminal (see PlotTerm): Braille dots, text
+    // in cells and ANSI colours. opts: cols (default: the COLUMNS variable,
+    // or 80), rows (default: the figure's shape, at most LINES - 1),
+    // color (default: true when the output is a terminal)
+    toText(opts = nil) {
+        o = opts ?? #{}
+        nc = o get("cols") ?? _envInt("COLUMNS") ?? 80
+        nr = o get("rows")
+        (nr == nil) ifTrue {
+            // a cell is about twice as tall as it is wide, as 4 dots are to 2
+            nr = Math round((nc * heightIn) / (widthIn * 2))
+            lines = _envInt("LINES")
+            (lines != nil) ifTrue { nr = Math min(nr, lines - 1) }
+        }
+        useColor = o get("color") ?? Console isTerminal
+        saved = [widthIn, heightIn, dpi]
+        // 10-point text is 4 dots high: one row of cells
+        tdpi = 28.8
+        self widthIn = (nc * 2) / tdpi
+        self heightIn = (nr * 4) / tdpi
+        self dpi = tdpi
+        try {
+            cv = PlotTerm new(nc, nr, useColor)
+            render(cv)
+            cv finish
+        } finally {
+            self widthIn = saved at(0)
+            self heightIn = saved at(1)
+            self dpi = saved at(2)
+        }
+    }
+
+    _envInt(name) {
+        v = System env(name)
+        ((v == nil) || (v == "")) ifTrue { return nil }
+        n = v toInt
+        ((n == nil) || (n <= 0)) ifTrue { nil } ifFalse { n }
+    }
+
     _withDpi(dpiFor, block) {
         (dpiFor == nil) ifTrue { return block value }
         saved = dpi
@@ -131,8 +170,15 @@ PlotFigure = Object clone {
     }
 
     // Save to a temporary PNG and open it in the system's image viewer;
-    // returns the file's path
-    show() {
+    // returns the file's path. With #{terminal: true} (and toText's
+    // options), or on Linux without a display, print it as text instead.
+    show(opts = nil) {
+        o = opts ?? #{}
+        noDisplay = (System platform == "linux") && ((System env("DISPLAY") ?? "") == "") && ((System env("WAYLAND_DISPLAY") ?? "") == "")
+        ((o get("terminal") == true) || (noDisplay && (o get("terminal") != false))) ifTrue {
+            toText(o) print
+            return nil
+        }
         path = File tempDir + "/figure.png"
         savefig(path)
         platform = System platform

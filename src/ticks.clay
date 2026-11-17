@@ -99,6 +99,155 @@ PlotTicks = Object clone {
         (neg && n != 0) ifTrue { minus + text } ifFalse { text }
     }
 
+    // log10 of a positive number (Clay's Math has no logarithm): split off
+    // the power of two, then ln(m) = 2 atanh((m - 1) / (m + 1)) for m in
+    // [1, 2), whose series converges quickly there
+    log10(x) {
+        v = x toFloat
+        (v <= 0) ifTrue { return nil }
+        k = 0
+        { v >= 2.0 } whileTrue { v = v / 2; k = k + 1 }
+        { v < 1.0 } whileTrue { v = v * 2; k = k - 1 }
+        z = (v - 1) / (v + 1)
+        z2 = z * z
+        term = z
+        sum = 0.0
+        n = 1
+        { n < 24 } whileTrue {
+            sum = sum + (term / n)
+            term = term * z2
+            n = n + 2
+        }
+        ((k * 0.6931471805599453) + (2 * sum)) / 2.302585092994046
+    }
+
+    // Ticks for a log axis whose view is [lo, hi] in powers of ten (log10 of
+    // the data): #{values:, labels:, minor:}. Majors fall on decades (every
+    // second or more when there are many) and read "10^k", which PlotAxes
+    // draws with a raised exponent. Minor ticks go at 2..9 times each decade.
+    // With fewer than two decades in view, 1, 2 and 5 times each are labelled.
+    locateLog(lo, hi, maxTicks = 8) {
+        (hi < lo) ifTrue { t = lo; lo = hi; hi = t }
+        k0 = Math ceil(lo - 0.0001) toInt
+        k1 = Math floor(hi + 0.0001) toInt
+        every = 1
+        { (((k1 - k0) / every) + 1) > Math max(maxTicks, 2) } whileTrue { every = every + 1 }
+        k = Math ceil(k0 / every toFloat) toInt * every
+        values = []
+        { k <= k1 } whileTrue { values append(k toFloat); k = k + every }
+        labels = values map { |e| _powLabel(Math round(e)) }
+        minor = []
+        (every == 1) ifTrue {
+            d = Math floor(lo) toInt
+            { d <= k1 } whileTrue {
+                (2..9) each { |m|
+                    v = d + log10(m)
+                    ((v >= lo - 0.0001) && (v <= hi + 0.0001)) ifTrue { minor append(v) }
+                }
+                d = d + 1
+            }
+        }
+        (values size < 2) ifTrue {
+            values = []
+            labels = []
+            d = Math floor(lo) toInt
+            { d <= k1 } whileTrue {
+                [1, 2, 5] each { |m|
+                    v = d + log10(m)
+                    ((v >= lo - 0.0001) && (v <= hi + 0.0001)) ifTrue {
+                        values append(v)
+                        labels append(short(m * pow10(d)))
+                    }
+                }
+                d = d + 1
+            }
+        }
+        #{values: values, labels: labels, minor: minor}
+    }
+
+    // "10^k": a label drawn as 10 with k raised
+    _powLabel(k) { "10^" + ((k < 0) ifTrue { minus + k abs toString } ifFalse { k toString }) }
+
+    // A number in a printf or Python format: "%.1f%%", "%d", "%g", "%s",
+    // "{:.1f}", "{:,.0f}", "{:.0%}", "{}". A format with braces is Python's
+    // str.format style, where % is plain text. A block is called with v
+    // instead.
+    printf(fmt, v) {
+        (fmt == nil) ifTrue { return short(v) }
+        (fmt type == "Block") ifTrue { return (fmt value(v)) toString }
+        braces = fmt contains("{")
+        out = ""
+        i = 0
+        n = fmt length
+        { i < n } whileTrue {
+            ch = fmt at(i)
+            ((ch == "%") && braces not) ifTrue {
+                (fmt slice(i + 1, i + 2) == "%") ifTrue { out = out + "%"; i = i + 2 } ifFalse {
+                    j = i + 1
+                    { (j < n) && ("0123456789.-+ #," contains(fmt at(j))) } whileTrue { j = j + 1 }
+                    (j >= n) ifTrue { raise("Plot: format \"" + fmt + "\" ends in the middle of a % spec") }
+                    out = out + _spec(fmt slice(i + 1, j), fmt at(j), v)
+                    i = j + 1
+                }
+            } ifFalse {
+                (ch == "{") ifTrue {
+                    j = i + 1
+                    { (j < n) && (fmt at(j) != "}") } whileTrue { j = j + 1 }
+                    body = fmt slice(i + 1, j)
+                    colon = body indexOf(":")
+                    spec = (colon < 0) ifTrue { "" } ifFalse { body slice(colon + 1, body length) }
+                    last = (spec length > 0) ifTrue { spec at(spec length - 1) } ifFalse { "" }
+                    kind = ((last != "") && ("dfgse%" contains(last))) ifTrue { last } ifFalse { "" }
+                    flags = (kind == "") ifTrue { spec } ifFalse { spec slice(0, spec length - 1) }
+                    out = out + _spec(flags, kind, v)
+                    i = j + 1
+                } ifFalse {
+                    out = out + ch
+                    i = i + 1
+                }
+            }
+        }
+        out
+    }
+
+    // One conversion: flags such as "1.2", ",.0" or ".1"; kind d f g s e %,
+    // or "" (as str)
+    _spec(flags, kind, v) {
+        dot = flags indexOf(".")
+        prec = (dot < 0) ifTrue { nil } ifFalse { (flags slice(dot + 1, flags length)) toInt }
+        text = nil
+        (kind == "s" || kind == "") ifTrue { text = (v type == "Number") ifTrue { short(v) } ifFalse { v toString } }
+        (kind == "d") ifTrue { text = format(v, 0) }
+        (kind == "f") ifTrue { text = format(v, prec ?? 6) }
+        (kind == "g") ifTrue { text = short(v, prec ?? 6) }
+        (kind == "e") ifTrue {
+            e = exponent(v)
+            m = format(v / pow10(e), prec ?? 6)
+            text = m + "e" + ((e < 0) ifTrue { "-" } ifFalse { "+" }) + e abs toString padLeft(2, "0")
+        }
+        (kind == "%") ifTrue { text = format(v * 100, prec ?? 6) + "%" }
+        (text == nil) ifTrue { raise("Plot: unknown format conversion: " + kind) }
+        (flags contains(",")) ifTrue { text = _thousands(text) }
+        text
+    }
+
+    // "1234567.5" -> "1,234,567.5"
+    _thousands(text) {
+        neg = text startsWith(minus)
+        body = neg ifTrue { text slice(minus length, text length) } ifFalse { text }
+        dot = body indexOf(".")
+        whole = (dot < 0) ifTrue { body } ifFalse { body slice(0, dot) }
+        rest = (dot < 0) ifTrue { "" } ifFalse { body slice(dot, body length) }
+        out = ""
+        k = whole length
+        { k > 3 } whileTrue {
+            out = "," + whole slice(k - 3, k) + out
+            k = k - 3
+        }
+        out = whole slice(0, k) + out + rest
+        neg ifTrue { minus + out } ifFalse { out }
+    }
+
     // A short label for any number: up to 4 significant decimals, trailing
     // zeros dropped (used for annotations such as heatmap cells)
     short(v, digits = 4) {

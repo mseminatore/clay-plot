@@ -6,7 +6,8 @@
 //   clay bricks add github.com/mseminatore/clay-ann ann
 //   clay bricks add github.com/mseminatore/clay-plot plot
 // run
-//   clay bricks/plot/examples/fashion_mnist.clay [file.csv] [--epochs n]
+//   clay bricks/plot/examples/fashion_mnist.clay [file.csv] [--epochs n] [--live]
+// --live draws the learning curve in the terminal as it trains.
 // The default file is the Fashion-MNIST test set that comes with clay-ann
 // (10,000 images): a fifth is held back for testing. Figures go to
 // fashion_mnist_*.png in the current directory.
@@ -15,10 +16,13 @@ import("plot")
 
 path = "bricks/ann/native/libann/data/fashion-mnist_test.csv"
 epochs = 12
+live = false
 args = System args
 i = 0
 { i < args size } whileTrue {
-    (args at(i) == "--epochs") ifTrue { i = i + 1; epochs = (args at(i)) toInt } ifFalse { path = args at(i) }
+    (args at(i) == "--epochs") ifTrue { i = i + 1; epochs = (args at(i)) toInt } ifFalse {
+        (args at(i) == "--live") ifTrue { live = true } ifFalse { path = args at(i) }
+    }
     i = i + 1
 }
 names = ["T-shirt", "Trouser", "Pullover", "Dress", "Coat", "Sandal", "Shirt", "Sneaker", "Bag", "Ankle boot"]
@@ -43,8 +47,10 @@ net = Ann network(#{"loss": "cross_entropy", "learningRate": 0.001, "quiet": tru
 net input(784)
 net dense(128, "relu")
 net output(10, "softmax")
+// Plot liveCurve redraws the learning curve in the terminal after each epoch
+progress = live ifTrue { Plot liveCurve } ifFalse { { |e| ("epoch " + e get("epoch") toString) println } }
 history = net fit(xTrain, yTrain, #{"epochs": epochs, "batchSize": 32, "validation": [xValid, yValid], "patience": 3,
-                         "onEpoch": { |e| ("epoch " + e get("epoch") toString) println }})
+                         "onEpoch": progress})
 ("test accuracy " + (Math round(net accuracy(xTest, yTest) * 1000) / 10.0) toString + "%") println
 
 // --- plots --------------------------------------------------------------------

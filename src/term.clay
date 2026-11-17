@@ -1,0 +1,406 @@
+// PlotTerm -- the terminal backend: figures drawn with text characters
+//
+// The same primitives as PlotSvg (see svg.clay), drawn on a grid of
+// character cells. Lines, markers and fills are Braille dots, 2 x 4 to a
+// cell, so a "pixel" here is one dot. Text goes into whole cells, one
+// character two dots wide; images use half blocks (two pixels a cell).
+// Colours are 24-bit ANSI escapes, or none for plain text. Black and white
+// draw in the terminal's own colour, since the background may be either.
+//
+// PlotFigure toText lays a figure out at a dpi where 10-point text is one
+// row of cells, so the usual layout (ticks, labels, legends) fits.
+
+PlotTerm = Object clone {
+    cols = 0
+    rows = 0
+    width = 0               // in dots
+    height = 0
+    color = true
+    dots = nil              // per cell: a Braille bit mask
+    fg = nil                // per cell: "#rrggbb" or nil
+    chars = nil             // per cell: text, nil, or "" (the second half of a wide character)
+    blocks = nil            // per cell: [top, bottom] colours of an image, or nil
+    clipBox = nil           // [x0, y0, x1, y1] in dots
+    _braille = nil
+
+    init(cols, rows, useColor = true) {
+        self cols = cols
+        self rows = rows
+        self width = cols * 2
+        self height = rows * 4
+        self color = useColor
+        n = cols * rows
+        self dots = (1..n) map { |i| 0 }
+        self fg = (1..n) map { |i| nil }
+        self chars = (1..n) map { |i| nil }
+        self blocks = (1..n) map { |i| nil }
+        self clipBox = nil
+    }
+
+    // ---- primitives -------------------------------------------------------
+
+    line(x1, y1, x2, y2, style) {
+        st = style ?? #{}
+        c = st get("stroke")
+        (c == nil) ifTrue { return nil }
+        // tick marks (under two dots) only clutter cells
+        (((x2 - x1) abs < 2) && ((y2 - y1) abs < 2)) ifTrue { return nil }
+        _seg(x1, y1, x2, y2, c, st get("dash"), 0)
+    }
+
+    polyline(xs, ys, style) {
+        st = style ?? #{}
+        c = st get("stroke")
+        ((c == nil) || (xs size < 2)) ifTrue { return nil }
+        dash = st get("dash")
+        along = 0
+        (xs size - 1) times { |i|
+            along = _seg(xs at(i), ys at(i), xs at(i + 1), ys at(i + 1), c, dash, along)
+        }
+    }
+
+    polygon(xs, ys, style) {
+        st = style ?? #{}
+        (xs size < 3) ifTrue { return nil }
+        (st get("fill") != nil) ifTrue { _fill(xs, ys, st get("fill"), st get("alpha")) }
+        c = st get("stroke")
+        (c != nil) ifTrue {
+            n = xs size
+            n times { |i|
+                j = (i + 1) % n
+                _seg(xs at(i), ys at(i), xs at(j), ys at(j), c, nil, 0)
+            }
+        }
+    }
+
+    rect(x, y, w, h, style) {
+        (w < 0) ifTrue { x = x + w; w = 0 - w }
+        (h < 0) ifTrue { y = y + h; h = 0 - h }
+        polygon([x, x + w, x + w, x], [y, y, y + h, y + h], style)
+    }
+
+    circle(cx, cy, r, style) {
+        st = style ?? #{}
+        c = st get("fill") ?? st get("stroke")
+        (c == nil) ifTrue { return nil }
+        (r < 1.2) ifTrue { return _dot(cx, cy, c) }
+        y = Math floor(cy - r)
+        { y <= cy + r } whileTrue {
+            x = Math floor(cx - r)
+            { x <= cx + r } whileTrue {
+                dx = (x + 0.5) - cx
+                dy = (y + 0.5) - cy
+                inside = ((dx * dx) + (dy * dy)) <= (r * r)
+                ring = (st get("fill") == nil) && (((dx * dx) + (dy * dy)) < ((r - 1) * (r - 1)))
+                (inside && ring not) ifTrue { _dot(x, y, c) }
+                x = x + 1
+            }
+            y = y + 1
+        }
+    }
+
+    text(x, y, s, style) {
+        s = s toString
+        glyphs = _glyphs(s)
+        n = glyphs size
+        (n == 0) ifTrue { return nil }
+        c = _ink(style get("color") ?? "#000000")
+        rot = style get("rotate") ?? 0
+        anchor = style get("anchor") ?? "start"
+        valign = style get("valign") ?? "baseline"
+        // turned text runs down the cells, one character a row
+        ((rot >= 60) && (rot <= 120)) ifTrue {
+            col = Math floor(x / 2)
+            row0 = Math round((y / 4) - (n / 2.0))
+            (anchor == "start") ifTrue { row0 = Math floor(y / 4) - n }
+            (anchor == "end") ifTrue { row0 = Math floor(y / 4) }
+            n times { |i| _put(col, row0 + i, glyphs at(i), c) }
+            return nil
+        }
+        cx = x / 2
+        col0 = (anchor == "middle") ifTrue { Math round(cx - (n / 2.0)) } ifFalse {
+            (anchor == "end") ifTrue { Math round(cx) - n } ifFalse { Math round(cx) }
+        }
+        // whole rows: text hanging from y starts on the next row boundary,
+        // text standing on y ends on the one above
+        row = Math floor(y / 4)
+        (valign == "top") ifTrue { row = Math ceil((y / 4) - 0.1) }
+        ((valign == "bottom") || (valign == "baseline")) ifTrue { row = Math floor((y - 1) / 4) }
+        n times { |i| _put(col0 + i, row, glyphs at(i), c) }
+    }
+
+    // An Image, two pixels a cell (upper and lower half blocks)
+    image(x, y, w, h, img, style = nil) {
+        st = style ?? #{}
+        flip = st get("flipY") == true
+        iw = img width
+        ih = img height
+        ch = img channels
+        fl = img floats
+        c0 = Math max(0, Math floor(x / 2))
+        c1 = Math min(cols - 1, Math ceil((x + w) / 2) - 1)
+        r0 = Math max(0, Math floor(y / 4))
+        r1 = Math min(rows - 1, Math ceil((y + h) / 4) - 1)
+        r = r0
+        { r <= r1 } whileTrue {
+            c = c0
+            { c <= c1 } whileTrue {
+                px = (c * 2) + 1
+                (_clipped(px, (r * 4) + 2) not) ifTrue {
+                    top = _sample(fl, iw, ih, ch, (px - x) / w, (((r * 4) + 1) - y) / h, flip)
+                    bot = _sample(fl, iw, ih, ch, (px - x) / w, (((r * 4) + 3) - y) / h, flip)
+                    ((top != nil) || (bot != nil)) ifTrue { blocks setAt((r * cols) + c, [top, bot]) }
+                }
+                c = c + 1
+            }
+            r = r + 1
+        }
+    }
+
+    clip(x, y, w, h) { self clipBox = [x, y, x + w, y + h] }
+    unclip() { self clipBox = nil }
+
+    // A text's width in dots: two a character, whatever the size
+    measure(s, size) {
+        (s == nil) ifTrue { return 0 }
+        _glyphs(s toString) size * 2
+    }
+
+    // Digits and a minus as superscripts (the "10^k" labels of log axes)
+    superscript(s) {
+        sup = ["\xe2\x81\xb0", "\xc2\xb9", "\xc2\xb2", "\xc2\xb3", "\xe2\x81\xb4", "\xe2\x81\xb5",
+               "\xe2\x81\xb6", "\xe2\x81\xb7", "\xe2\x81\xb8", "\xe2\x81\xb9"]
+        out = ""
+        _glyphs(s) each { |g|
+            d = "0123456789" indexOf(g)
+            ((g length == 1) && (d >= 0)) ifTrue { out = out + sup at(d) } ifFalse {
+                ((g == "-") || (g == PlotTicks minus)) ifTrue { out = out + "\xe2\x81\xbb" } ifFalse { out = out + g }
+            }
+        }
+        out
+    }
+
+    // The grid as text, one line a row, with colour escapes if wanted
+    finish() {
+        _brailleTable
+        lines = []
+        rows times { |r|
+            out = ""
+            current = nil
+            currentBg = nil
+            last = -1
+            // drop empty cells at the end of the row
+            cols times { |c|
+                i = (r * cols) + c
+                ((chars at(i) != nil) || (dots at(i) != 0) || (blocks at(i) != nil)) ifTrue { last = c }
+            }
+            (last + 1) times { |c|
+                i = (r * cols) + c
+                ch = chars at(i)
+                want = nil
+                wantBg = nil
+                glyph = " "
+                (ch != nil) ifTrue { glyph = ch; want = fg at(i) } ifFalse {
+                    (dots at(i) != 0) ifTrue { glyph = _braille at(dots at(i)); want = fg at(i) } ifFalse {
+                        b = blocks at(i)
+                        (b != nil) ifTrue {
+                            color ifTrue {
+                                glyph = "\xe2\x96\x80"      // upper half block
+                                want = b at(0) ?? "bg"
+                                wantBg = b at(1)
+                            } ifFalse { glyph = _shade(b) }
+                        }
+                    }
+                }
+                color ifTrue {
+                    ((want != current) || (wantBg != currentBg)) ifTrue {
+                        out = out + "\x1b[0m"
+                        ((want != nil) && (want != "bg")) ifTrue { out = out + _escape(want, 38) }
+                        (wantBg != nil) ifTrue { out = out + _escape(wantBg, 48) }
+                        current = want
+                        currentBg = wantBg
+                    }
+                }
+                out = out + glyph
+            }
+            (color && ((current != nil) || (currentBg != nil))) ifTrue { out = out + "\x1b[0m" }
+            lines append(out)
+        }
+        lines join("\n") + "\n"
+    }
+
+    // ---- internal -----------------------------------------------------------
+
+    // One dot, in the cell's colour (white fills erase: they are background)
+    _dot(x, y, hex) {
+        px = Math floor(x)
+        py = Math floor(y)
+        ((px < 0) || (py < 0) || (px >= width) || (py >= height)) ifTrue { return nil }
+        _clipped(px, py) ifTrue { return nil }
+        i = ((py / 4) * cols) + (px / 2)
+        bit = _bit(px % 2, py % 4)
+        (_isWhite(hex)) ifTrue {
+            dots setAt(i, dots at(i) & (255 - bit))
+            chars setAt(i, nil)
+            blocks setAt(i, nil)
+            return nil
+        }
+        dots setAt(i, dots at(i) | bit)
+        fg setAt(i, _ink(hex))
+    }
+
+    _clipped(px, py) {
+        (clipBox == nil) ifTrue { return false }
+        b = clipBox
+        ((px + 0.5) < b at(0)) || ((px + 0.5) > b at(2)) || ((py + 0.5) < b at(1)) || ((py + 0.5) > b at(3))
+    }
+
+    // The Braille bit for a dot at (dx, dy) within its cell
+    _bit(dx, dy) {
+        (dy == 3) ifTrue { return (dx == 0) ifTrue { 64 } ifFalse { 128 } }
+        (dx == 0) ifTrue { 1 << dy } ifFalse { 8 << dy }
+    }
+
+    // A straight run of dots; dash is [on, off, ...] in dots, along is how far
+    // the pattern has gone. Returns along at the end.
+    _seg(x1, y1, x2, y2, hex, dash, along) {
+        dx = x2 - x1
+        dy = y2 - y1
+        len = Math sqrt((dx * dx) + (dy * dy))
+        n = Math max(1, Math ceil(Math max(dx abs, dy abs)) toInt)
+        period = ((dash == nil) || (dash size == 0)) ifTrue { 0 } ifFalse { dash sum }
+        // dashes a few dots long would read as dots: stretch the pattern
+        ((period > 0) && (period < 7)) ifTrue {
+            dash = dash map { |d| (d * 7) / period }
+            period = 7
+        }
+        (0..n) each { |k|
+            t = k / n toFloat
+            on = true
+            (period > 0) ifTrue {
+                pos = (along + (t * len)) % period
+                acc = 0
+                j = 0
+                { j < dash size } whileTrue {
+                    acc = acc + dash at(j)
+                    (pos < acc) ifTrue { on = (j % 2) == 0; j = dash size } ifFalse { j = j + 1 }
+                }
+            }
+            on ifTrue { _dot(x1 + (dx * t), y1 + (dy * t), hex) }
+        }
+        along + len
+    }
+
+    // Fill a polygon (even-odd), dot by dot, sampling dot centres
+    _fill(xs, ys, hex, alpha) {
+        ((alpha != nil) && (alpha < 0.25)) ifTrue { return nil }
+        n = xs size
+        y0 = Math max(0, Math floor(ys min))
+        y1 = Math min(height - 1, Math ceil(ys max))
+        y = y0
+        { y <= y1 } whileTrue {
+            sy = y + 0.5
+            hits = []
+            n times { |i|
+                j = (i + 1) % n
+                ya = ys at(i)
+                yb = ys at(j)
+                (((ya <= sy) && (yb > sy)) || ((yb <= sy) && (ya > sy))) ifTrue {
+                    hits append(xs at(i) + (((sy - ya) / (yb - ya)) * (xs at(j) - xs at(i))))
+                }
+            }
+            hits = _sorted(hits)
+            k = 0
+            { (k + 1) < hits size } whileTrue {
+                x = Math max(0, Math ceil(hits at(k) - 0.5))
+                xe = Math min(width - 1, Math floor(hits at(k + 1) - 0.5))
+                { x <= xe } whileTrue { _dot(x, y, hex); x = x + 1 }
+                k = k + 2
+            }
+            y = y + 1
+        }
+    }
+
+    // Insertion sort (few values; Array sort orders floats as text before Clay 0.3.6)
+    _sorted(a) {
+        out = []
+        a each { |v|
+            i = out size
+            out append(v)
+            { (i > 0) && (out at(i - 1) > v) } whileTrue {
+                out setAt(i, out at(i - 1))
+                i = i - 1
+            }
+            out setAt(i, v)
+        }
+        out
+    }
+
+    _put(col, row, glyph, c) {
+        ((col < 0) || (row < 0) || (col >= cols) || (row >= rows)) ifTrue { return nil }
+        i = (row * cols) + col
+        chars setAt(i, glyph)
+        fg setAt(i, c)
+    }
+
+    // A string's characters (UTF-8 sequences kept whole)
+    _glyphs(s) {
+        out = []
+        b = s bytes
+        i = 0
+        { i < b size } whileTrue {
+            j = i + 1
+            { (j < b size) && ((b at(j) & 192) == 128) } whileTrue { j = j + 1 }
+            out append(s slice(i, j))
+            i = j
+        }
+        out
+    }
+
+    // An image pixel at fractions (u, v) of its width and height, as a colour
+    _sample(fl, iw, ih, ch, u, v, flip) {
+        ((u < 0) || (u >= 1) || (v < 0) || (v >= 1)) ifTrue { return nil }
+        flip ifTrue { v = 1 - v }
+        ix = Math min(iw - 1, Math floor(u * iw))
+        iy = Math min(ih - 1, Math floor(v * ih))
+        k = ((iy * iw) + ix) * ch
+        (ch >= 4) ifTrue { (fl at(k + 3) < 0.5) ifTrue { return nil } }
+        (ch < 3) ifTrue { g = fl at(k); return PlotColor hex([g, g, g]) }
+        PlotColor hex([fl at(k), fl at(k + 1), fl at(k + 2)])
+    }
+
+    // Shades for images in plain text, by brightness
+    _shade(b) {
+        hex = b at(0) ?? b at(1)
+        rgb = PlotColor rgb(hex)
+        lum = ((rgb at(0) * 0.299) + (rgb at(1) * 0.587) + (rgb at(2) * 0.114)) / 255
+        shades = [" ", "\xe2\x96\x91", "\xe2\x96\x92", "\xe2\x96\x93", "\xe2\x96\x88"]
+        shades at(Math min(4, Math floor(lum * 5)))
+    }
+
+    // The colour to draw in: nil (the terminal's own) for black, white and
+    // grays near them, else the colour
+    _ink(hex) {
+        (hex == nil) ifTrue { return nil }
+        rgb = PlotColor rgb(hex)
+        lo = Math min(rgb at(0), Math min(rgb at(1), rgb at(2)))
+        hi = Math max(rgb at(0), Math max(rgb at(1), rgb at(2)))
+        ((hi < 60) || (lo > 230)) ifTrue { nil } ifFalse { hex }
+    }
+
+    _isWhite(hex) {
+        rgb = PlotColor rgb(hex)
+        (rgb at(0) > 245) && (rgb at(1) > 245) && (rgb at(2) > 245)
+    }
+
+    _escape(hex, kind) {
+        rgb = PlotColor rgb(hex)
+        "\x1b[" + kind toString + ";2;" + rgb at(0) toString + ";" + rgb at(1) toString + ";" + rgb at(2) toString + "m"
+    }
+
+    _brailleTable() {
+        (_braille != nil) ifTrue { return _braille }
+        self _braille = (0..255) map { |m| String fromBytes([226, 160 + (m >> 6), 128 + (m & 63)]) }
+        _braille
+    }
+}

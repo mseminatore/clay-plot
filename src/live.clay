@@ -1,0 +1,79 @@
+// PlotLive -- a learning curve redrawn in the terminal as a network trains
+//
+//   live = Plot liveCurve
+//   history = net fit(x, y, #{epochs: 30, validation: [vx, vy], onEpoch: live})
+//   live savefig("loss.png")             // the finished curve as a picture
+//
+// clay-ann's fit calls onEpoch with a Dict per epoch (epoch, loss, valLoss,
+// lr); live takes those, or a number (the loss), from anything else:
+// live value(0.42). In a terminal the chart is drawn over itself each time;
+// when the output is not a terminal (a log file), each epoch is one line.
+
+PlotLive = Object clone {
+    history = nil
+    opts = nil
+    every = 1
+    drawn = 0               // lines printed last time, to go back over
+    tty = true
+
+    // opts: cols, rows, color (as PlotFigure toText), every (redraw every
+    // n epochs), title, figsize, and learningCurve's xlabel, ylabel, best
+    init(o = nil) {
+        self opts = o ?? #{}
+        self history = []
+        self every = self opts get("every") ?? 1
+        self drawn = 0
+        self tty = self opts get("terminal") ?? Console isTerminal
+    }
+
+    // One epoch: a Dict as fit's, or a loss. Returns true, so training goes on.
+    value(entry) {
+        (entry type == "Number") ifTrue { entry = #{"epoch": history size + 1, "loss": entry} }
+        history append(entry)
+        tty ifTrue {
+            ((history size % every) == 0) ifTrue { redraw }
+        } ifFalse {
+            _summary(entry) println
+        }
+        true
+    }
+
+    // Draw the chart now, over the last one
+    redraw() {
+        // short enough to fit on screen, or going back over it fails
+        o = #{rows: 20}
+        opts each { |k, v| o set(k, v) }
+        rows = figure toText(o) split("\n")
+        (rows last == "") ifTrue { rows pop }
+        out = ""
+        // back to the start of the chart drawn last time
+        (drawn > 0) ifTrue { out = "\x1b[" + drawn toString + "F" }
+        rows each { |r| out = out + r + "\x1b[K\n" }
+        out print
+        self drawn = rows size
+        self
+    }
+
+    // The learning curve so far, as a figure (to save, or to show)
+    figure() {
+        fig = PlotFigure new(#{figsize: opts get("figsize") ?? Plot rc get("figure.figsize")})
+        ax = fig addSubplot(1, 1, 1)
+        (history size > 0) ifTrue {
+            PlotML learningCurve(ax, history, opts)
+            ax title(opts get("title") ?? _summary(history last))
+        }
+        fig
+    }
+
+    // Save the learning curve as .png or .svg (savefig's options)
+    savefig(path, o = nil) { figure savefig(path, o) }
+
+    // "epoch 12  loss 0.3412  val 0.3611"
+    _summary(entry) {
+        (entry type != "Dict") ifTrue { return entry toString }
+        s = "epoch " + (entry get("epoch") ?? history size) toString
+        ((entry get("loss") ?? -1) >= 0) ifTrue { s = s + "  loss " + PlotTicks format(entry get("loss"), 4) }
+        ((entry get("valLoss") ?? -1) >= 0) ifTrue { s = s + "  val " + PlotTicks format(entry get("valLoss"), 4) }
+        s
+    }
+}

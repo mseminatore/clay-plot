@@ -124,7 +124,9 @@ PlotML = Object clone {
                     name = k
                     (k == "loss") ifTrue { name = "train" }
                     (k == "valLoss") ifTrue { name = "validation" }
-                    out append([name, _gaps(h map { |e| e get(k) })])
+                    values = _gaps(h map { |e| e get(k) })
+                    // (valLoss is -1 throughout without validation data)
+                    ((values filter { |v| v != nil }) size > 0) ifTrue { out append([name, values]) }
                 }
             }
             return out

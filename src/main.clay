@@ -17,7 +17,9 @@
 // (plot, scatter, bar, hist, imshow ...) go to the current axes. Figures and
 // axes can also be used directly: PlotFigure, PlotAxes. Colours and
 // colormaps are in PlotColor, tick placement in PlotTicks, and the backends
-// are PlotSvg and PlotPng (which draws on the image brick's Canvas).
+// are PlotSvg, PlotPng (which draws on the image brick's Canvas) and
+// PlotTerm (text for terminals). PlotML has the machine-learning plots and
+// PlotLive the learning curve drawn as training runs.
 //
 // Every brick shares one set of top-level names with the program that imports
 // it, so this one's all start with Plot.
@@ -27,9 +29,11 @@ import("color.clay")
 import("ticks.clay")
 import("svg.clay")
 import("png.clay")
+import("term.clay")
 import("axes.clay")
 import("figure.clay")
 import("ml.clay")
+import("live.clay")
 
 Plot = Object clone {
     current = nil
@@ -114,6 +118,14 @@ Plot = Object clone {
     text(x, y, s, opts = nil) { gca text(x, y, s, opts) }
     imshow(data, opts = nil) { gca imshow(data, opts) }
     colorbar(art = nil, opts = nil) { gca colorbar(art, opts) }
+    step(x, y, a = nil, b = nil) { gca step(x, y, a, b) }
+    errorbar(x, y, a = nil, b = nil) { gca errorbar(x, y, a, b) }
+    pie(values, opts = nil) { gca pie(values, opts) }
+    stackplot(x, a = nil, b = nil, c = nil, d = nil, e = nil, f = nil, g = nil, h = nil) { gca stackplot(x, a, b, c, d, e, f, g, h) }
+    barLabel(bars, opts = nil) { gca barLabel(bars, opts) }
+    semilogy(a = nil, b = nil, c = nil, d = nil) { gca semilogy(a, b, c, d) }
+    semilogx(a = nil, b = nil, c = nil, d = nil) { gca semilogx(a, b, c, d) }
+    loglog(a = nil, b = nil, c = nil, d = nil) { gca loglog(a, b, c, d) }
 
     // ---- machine learning (ml.clay) ----------------------------------------
 
@@ -121,6 +133,10 @@ Plot = Object clone {
     confusionMatrix(matrix, opts = nil) { gca confusionMatrix(matrix, opts) }
     roc(scores, targets, opts = nil) { gca roc(scores, targets, opts) }
     precisionRecall(scores, targets, opts = nil) { gca precisionRecall(scores, targets, opts) }
+
+    // A learning curve drawn in the terminal as training runs: pass it as
+    // clay-ann fit's onEpoch. See PlotLive for the options.
+    liveCurve(opts = nil) { PlotLive new(opts) }
 
     // A new figure of images in a grid; see PlotML imageGrid for the options
     imageGrid(images, opts = nil) { PlotML imageGrid(images, opts ?? #{}) }
@@ -137,6 +153,8 @@ Plot = Object clone {
     grid(on = true, opts = nil) { gca grid(on, opts) }
     legend(a = nil, b = nil) { gca legend(a, b) }
     axis(mode) { gca axis(mode) }
+    xscale(kind) { gca xscale(kind) }
+    yscale(kind) { gca yscale(kind) }
     suptitle(s, opts = nil) { gcf suptitle(s, opts) }
 
     // ---- output -----------------------------------------------------------
@@ -150,12 +168,16 @@ Plot = Object clone {
     toPng(dpiFor = nil) { gcf toPng(dpiFor) }
 
     // Open the current figure in the system viewer, then start afresh (as
-    // pyplot's show); returns the temporary file's path
-    show() {
-        path = gcf show
+    // pyplot's show); returns the temporary file's path. Plot show(#{terminal:
+    // true}) prints it in the terminal instead (see PlotFigure toText).
+    show(opts = nil) {
+        path = gcf show(opts)
         close
         path
     }
+
+    // The current figure as text for a terminal: #{cols:, rows:, color:}
+    toText(opts = nil) { gcf toText(opts) }
 
     // Forget the current figure
     close() { self current = nil; self currentAxes = nil; nil }
