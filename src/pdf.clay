@@ -1,0 +1,263 @@
+// PlotPdf -- the PDF backend: draws plot primitives on a page (pdf brick)
+//
+// The same primitives as PlotSvg (see svg.clay), drawn as vector graphics on
+// a PdfPage, so lines and text stay sharp at any zoom. Figures are drawn at
+// 72 dpi, so a pixel here is a PDF point. Text uses Helvetica (the standard
+// PDF font, nothing embedded) and is measured with its metrics; characters
+// outside Windows-1252 show as "?".
+//
+// A figure can be its own PDF (Figure toPdf, savefig("x.pdf")) or be drawn
+// into a region of a page of a larger document (Figure drawPdf), e.g. a
+// report with text and figures.
+
+PlotPdf = Object clone {
+    page = nil
+    width = 0
+    height = 0
+
+    // Draw on page with the figure's top-left corner at (x, y), scaled by
+    // scale; background nil leaves the page showing through
+    init(page, w, h, background = "#ffffff", x = 0, y = 0, scale = 1) {
+        self page = page
+        self width = w
+        self height = h
+        self _clear
+        // figure coordinates to the page's: PDF's y goes up from the page bottom
+        ph = page height
+        page save
+        page raw((Pdf num(scale)) + " 0 0 " + (Pdf num(scale)) + " " + (Pdf num(x)) + " " +
+            (Pdf num((ph - y) - (scale * ph))) + " cm")
+        page clipRect(0, 0, w, h)
+        (background != nil) ifTrue { page fillColor(background) fillRect(0, 0, w, h) }
+    }
+
+    // Close the figure's graphics state; the page
+    finish() {
+        page restore
+        page
+    }
+
+    line(x1, y1, x2, y2, style) {
+        st = style ?? #{}
+        (st get("stroke") == nil) ifTrue { return nil }
+        _begin(st)
+        _strokeStyle(st)
+        page line(x1, y1, x2, y2)
+        _end(st)
+    }
+
+    polyline(xs, ys, style) {
+        (xs size < 2) ifTrue { return nil }
+        st = style ?? #{}
+        (st get("stroke") == nil) ifTrue { return nil }
+        _begin(st)
+        _strokeStyle(st)
+        page polyline(_points(xs, ys))
+        _end(st)
+    }
+
+    polygon(xs, ys, style) {
+        (xs size < 3) ifTrue { return nil }
+        st = style ?? #{}
+        fill = _fill(st)
+        stroke = _stroke(st)
+        (fill || stroke) ifFalse { return nil }
+        _begin(st)
+        stroke ifTrue { _strokeStyle(st) }
+        page polygon(_points(xs, ys), fill, stroke)
+        _end(st)
+    }
+
+    rect(x, y, w, h, style) {
+        (w < 0) ifTrue { x = x + w; w = 0 - w }
+        (h < 0) ifTrue { y = y + h; h = 0 - h }
+        st = style ?? #{}
+        fill = _fill(st)
+        stroke = _stroke(st)
+        (fill || stroke) ifFalse { return nil }
+        _begin(st)
+        fill ifTrue { page fillRect(x, y, w, h) }
+        stroke ifTrue {
+            _strokeStyle(st)
+            page rect(x, y, w, h)
+        }
+        _end(st)
+    }
+
+    circle(cx, cy, r, style) {
+        st = style ?? #{}
+        fill = _fill(st)
+        stroke = _stroke(st)
+        (fill || stroke) ifFalse { return nil }
+        _begin(st)
+        stroke ifTrue { _strokeStyle(st) }
+        page circle(cx, cy, r, fill, stroke)
+        _end(st)
+    }
+
+    text(x, y, s, style) {
+        (s == nil) ifTrue { return nil }
+        st = style ?? #{}
+        size = st get("size") ?? 12
+        font = (st get("weight") == "bold") ifTrue { "Helvetica-Bold" } ifFalse { "Helvetica" }
+        _begin(st)
+        color = st get("color") ?? "#000000"
+        (color != _fillNow) ifTrue { page fillColor(color); self _fillNow = color }
+        anchor = st get("anchor") ?? "start"
+        page textAlign((anchor == "middle") ifTrue { "center" } ifFalse { (anchor == "end") ifTrue { "right" } ifFalse { "left" } })
+        valign = st get("valign") ?? "baseline"
+        page textBaseline((valign == "center") ifTrue { "middle" } ifFalse {
+            ((valign == "top") || (valign == "bottom")) ifTrue { valign } ifFalse { "alphabetic" }
+        })
+        page font(font, size)
+        page text(x, y, _text(s), st get("rotate") ?? 0)
+        _end(st)
+    }
+
+    // An Image (image brick) stretched over the rectangle, its pixels kept
+    // sharp. It goes in as a PNG (compressed); an alpha channel becomes a
+    // soft mask.
+    image(x, y, w, h, img, style = nil) {
+        st = style ?? #{}
+        _begin(st)
+        page image(_pdfImage(img, w, h), x, y, w, h, #{flipY: st get("flipY") == true})
+        _end(st)
+    }
+
+    clip(x, y, w, h) {
+        page save
+        page clipRect(x, y, w, h)
+    }
+
+    unclip() {
+        page restore
+        self _clear
+    }
+
+    measure(s, size) {
+        (s == nil) ifTrue { return 0 }
+        Pdf textWidth(_text(s), "Helvetica", size)
+    }
+
+    // ---- internal -----------------------------------------------------------
+
+    // The graphics state last set, so unchanged colours and line styles are
+    // not written again; forgotten when a restore brings back an older one
+    _clear() {
+        self _fillNow = nil
+        self _strokeNow = nil
+        self _widthNow = nil
+        self _dashNow = nil
+        self _capNow = nil
+        self _joinNow = nil
+    }
+
+    // Transparency lasts until restore, so a see-through primitive is drawn
+    // inside save / restore
+    _begin(st) {
+        alpha = st get("alpha")
+        ((alpha != nil) && (alpha < 1)) ifTrue {
+            page save
+            page alpha(alpha)
+        }
+    }
+
+    _end(st) {
+        alpha = st get("alpha")
+        ((alpha != nil) && (alpha < 1)) ifTrue {
+            page restore
+            self _clear
+        }
+    }
+
+    // Is there a fill (setting its colour)?
+    _fill(st) {
+        fill = st get("fill")
+        (fill == nil) ifTrue { return false }
+        (fill != _fillNow) ifTrue { page fillColor(fill); self _fillNow = fill }
+        true
+    }
+
+    // Is there a stroke (setting its colour)?
+    _stroke(st) {
+        stroke = st get("stroke")
+        (stroke == nil) ifTrue { return false }
+        (stroke != _strokeNow) ifTrue { page strokeColor(stroke); self _strokeNow = stroke }
+        true
+    }
+
+    _strokeStyle(st) {
+        _stroke(st)
+        lw = st get("width") ?? 1
+        (lw != _widthNow) ifTrue { page lineWidth(lw); self _widthNow = lw }
+        dash = st get("dash")
+        dashText = ((dash == nil) || (dash size == 0)) ifTrue { "" } ifFalse { (dash map { |d| Pdf num(d) }) join(" ") }
+        (dashText != (_dashNow ?? "")) ifTrue { page dash((dashText == "") ifTrue { [] } ifFalse { dash }); self _dashNow = dashText }
+        cap = st get("cap") ?? "butt"
+        (cap != (_capNow ?? "butt")) ifTrue { page lineCap(cap); self _capNow = cap }
+        join = st get("join") ?? "round"
+        (join != _joinNow) ifTrue { page lineJoin(join); self _joinNow = join }
+    }
+
+    _points(xs, ys) {
+        pts = []
+        xs size times { |i| pts push([xs at(i), ys at(i)]) }
+        pts
+    }
+
+    // Text for the standard fonts: the minus sign tick labels use (U+2212,
+    // not in Windows-1252) as an en dash, which has a digit's width
+    _text(s) {
+        t = s toString
+        (t contains(PlotTicks minus)) ifTrue { t = t replace(PlotTicks minus, "\xe2\x80\x93") }
+        t
+    }
+
+    // A PdfImage of an Image shown w x h points: gray or RGB as a PNG; with
+    // alpha, the colour and the alpha each as a PNG (the mask). Viewers
+    // smooth an image they enlarge, so a small one is first enlarged here,
+    // each pixel a block, to about 4 pixels a point (as matplotlib does).
+    _pdfImage(img, w, h) {
+        c = img channels
+        iw = img width
+        ih = img height
+        kx = Math max(1, Math ceil((w abs * 4) / iw))
+        ky = Math max(1, Math ceil((h abs * 4) / ih))
+        big = iw * ih * kx * ky
+        (big > 4000000) ifTrue {
+            f = Math sqrt(4000000.0 / big)
+            kx = Math max(1, Math floor(kx * f))
+            ky = Math max(1, Math floor(ky * f))
+        }
+        doc = page _doc
+        ((c == 1) || (c == 3)) ifTrue {
+            ((kx == 1) && (ky == 1)) ifTrue { return doc png(img pngBytes) }
+            return doc png((Image fromBytes(iw * kx, ih * ky, c, _enlarge(img pixels, iw, ih, c, kx, ky))) pngBytes)
+        }
+        parts = PdfImage splitAlpha(img pixels, c)
+        color = _enlarge(parts at(0), iw, ih, c - 1, kx, ky)
+        out = doc png((Image fromBytes(iw * kx, ih * ky, c - 1, color)) pngBytes)
+        (parts at(1) != nil) ifTrue {
+            alpha = _enlarge(parts at(1), iw, ih, 1, kx, ky)
+            out mask(doc png((Image fromBytes(iw * kx, ih * ky, 1, alpha)) pngBytes))
+        }
+        out
+    }
+
+    // Pixels (a String, c bytes each) with every pixel made a kx by ky block
+    _enlarge(px, w, h, c, kx, ky) {
+        ((kx == 1) && (ky == 1)) ifTrue { return px }
+        rows = []
+        h times { |r|
+            start = r * w * c
+            row = px slice(start, start + w * c)
+            (kx > 1) ifTrue {
+                cells = []
+                w times { |i| cells push((row slice(i * c, (i + 1) * c)) repeat(kx)) }
+                row = cells join("")
+            }
+            rows push((ky > 1) ifTrue { row repeat(ky) } ifFalse { row })
+        }
+        rows join("")
+    }
+}

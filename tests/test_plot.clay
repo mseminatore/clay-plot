@@ -771,8 +771,8 @@ Test describe("SVG output") {
         Test assertTrue(File read(path) contains("<svg"))
         File delete(path)
         File delete(dir)
-        e = Test assertRaises({ Plot savefig("x.pdf") })
-        Test assertTrue(e message contains(".png or .svg"))
+        e = Test assertRaises({ Plot savefig("x.bmp") })
+        Test assertTrue(e message contains(".png, .svg or .pdf"))
     }
     Test it("measures text with the font") {
         Test assertTrue(PlotSvg measure("MMMM", 10) > PlotSvg measure("iiii", 10))
@@ -994,6 +994,89 @@ Test describe("Terminal output") {
         // fit's history without validation has valLoss -1: no empty series
         lines = PlotML learningCurve(PlotFigure new addSubplot(1, 1, 1), [#{"epoch": 1, "loss": 0.5, "valLoss": -1}], #{})
         Test assertEqual(lines size, 1)
+    }
+}
+
+Test describe("PDF") {
+    // startxref points at the xref table, whose entries point at the objects
+    pdfOk = { |pdf|
+        tail = pdf slice(pdf lastIndexOf("startxref\n") + 10, pdf length)
+        at = ((tail split("\n")) at(0)) toInt
+        ok = (pdf startsWith("%PDF-")) && ((pdf slice(at, at + 5)) == "xref\n")
+        lines = (pdf slice(at, pdf length)) split("\n")
+        n = (((lines at(1)) split(" ")) at(1)) toInt
+        (1..(n - 1)) each { |i|
+            off = ((lines at(2 + i)) slice(0, 10)) toInt
+            ((pdf slice(off, off + (i toString length) + 6)) == (i toString + " 0 obj")) ifFalse { ok = false }
+        }
+        ok
+    }
+
+    Test it("saves a figure as a page its size in points") {
+        Plot close
+        Plot figure(#{figsize: [5, 3]})
+        Plot plot([0, 1, 2], [0, -1, 4], #{label: "line"})
+        Plot title("PDF"); Plot legend
+        path = File tempDir + "/clay_plot_test.pdf"
+        Plot savefig(path)
+        pdf = File read(path)
+        File delete(path)
+        Test assertTrue(pdfOk value(pdf))
+        Test assertTrue(pdf contains("/MediaBox [0 0 360 216]"))
+        Test assertTrue(pdf contains("/BaseFont /Helvetica"))
+        Test assertTrue(pdf contains("(PDF) Tj"))
+        Test assertTrue(pdf contains("(line) Tj"))
+    }
+    Test it("writes the minus sign as an en dash, measured like a digit") {
+        Plot close
+        Plot plot([0, 1], [-2, 2])
+        pdf = Plot gcf toPdf
+        Test assertTrue(pdf contains("(\\2262"))           // "-2..." with byte 150, an en dash
+        Test assertFalse(pdf contains("(?"))
+        Test assertEqual(PlotPdf measure(minus + "2", 10), Pdf textWidth("22", "Helvetica", 10))
+        Test assertEqual(PlotPdf measure("ab", 10), Pdf textWidth("ab", "Helvetica", 10))
+    }
+    Test it("draws see-through fills with a graphics state") {
+        Plot close
+        Plot fillBetween([0, 1, 2], [1, 2, 1], 0, #{alpha: 0.3})
+        pdf = Plot gcf toPdf
+        Test assertTrue(pdf contains("/ExtGState << /GS1 << /Type /ExtGState /ca 0.3 /CA 0.3 >>"))
+        Test assertTrue(pdf contains("/GS1 gs"))
+    }
+    Test it("embeds images, enlarged, with a mask for missing values") {
+        Plot close
+        Plot imshow([[1, 2], [3, nil]])       // nil is missing: transparent
+        pdf = Plot gcf toPdf
+        Test assertTrue(pdfOk value(pdf))
+        Test assertTrue(pdf contains("/Subtype /Image"))
+        Test assertTrue(pdf contains("/Filter /FlateDecode /DecodeParms << /Predictor 15"))
+        Test assertTrue(pdf contains("/SMask "))
+        // 2 pixels shown about 260 points wide: enlarged to ~4 pixels a point
+        w = ((pdf slice(pdf indexOf("/Width ") + 7, pdf length)) split(" ")) at(0) toInt
+        Test assertTrue(w > 900)
+    }
+    Test it("enlarges pixels into blocks") {
+        px = String fromBytes([1, 2, 3, 4])
+        Test assertEqual((PlotPdf _enlarge(px, 2, 2, 1, 2, 1)) bytes, [1, 1, 2, 2, 3, 3, 4, 4])
+        Test assertEqual((PlotPdf _enlarge(px, 2, 2, 1, 1, 2)) bytes, [1, 2, 1, 2, 3, 4, 3, 4])
+        Test assertEqual((PlotPdf _enlarge(String fromBytes([0, 9, 0, 7, 8, 9]), 2, 1, 3, 2, 1)) bytes, [0, 9, 0, 0, 9, 0, 7, 8, 9, 7, 8, 9])
+    }
+    Test it("draws into a region of a larger document") {
+        Plot close
+        fig = Plot figure(#{figsize: [4, 2]})
+        Plot plot([1, 2, 3])
+        doc = Pdf new()
+        page = doc addPage()
+        page text(72, 72, "Report")
+        h = fig drawPdf(page, 72, 100, 144)
+        Test assertEqual(h, 72)                                // 288 x 144 scaled by 0.5
+        Test assertTrue(page content contains("0.5 0 0 0.5 72 296 cm"))
+        Test assertTrue(pdfOk value(doc render))
+        Test assertEqual(fig dpi, 100)                          // put back after drawing
+    }
+    Test it("names .pdf when it can't save") {
+        e = Test assertRaises({ Plot savefig("chart.bmp") })
+        Test assertTrue(e message contains(".pdf"))
     }
 }
 

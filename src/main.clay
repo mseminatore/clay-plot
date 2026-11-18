@@ -19,8 +19,8 @@
 // colormaps are in PlotColor, tick placement in PlotTicks (and for dates in
 // PlotDates), the statistics behind box and violin plots in PlotStats,
 // contour geometry in PlotContour, and the backends are PlotSvg, PlotPng
-// (which draws on the image brick's Canvas) and PlotTerm (text for
-// terminals). PlotML has the machine-learning plots, PlotLive the learning
+// (which draws on the image brick's Canvas), PlotPdf (on a page of the pdf
+// brick's Pdf) and PlotTerm (text for terminals). PlotML has the machine-learning plots, PlotLive the learning
 // curve drawn as training runs, and PlotAnimation and PlotMovie animated
 // GIFs and PNGs.
 //
@@ -28,6 +28,7 @@
 // it, so this one's all start with Plot.
 
 import("image")
+import("pdf")
 import("color.clay")
 import("ticks.clay")
 import("stats.clay")
@@ -35,6 +36,7 @@ import("contour.clay")
 import("dates.clay")
 import("svg.clay")
 import("png.clay")
+import("pdf.clay")
 import("term.clay")
 import("axes.clay")
 import("figure.clay")

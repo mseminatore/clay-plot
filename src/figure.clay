@@ -84,8 +84,9 @@ PlotFigure = Object clone {
     // Remove all axes
     clear() { self axesList = []; self suptitleText = nil; self }
 
-    // Save to a file; the extension picks the format: .png or .svg.
-    // opts: dpi (pixels per inch for this file; the figure's own by default)
+    // Save to a file; the extension picks the format: .png, .svg or .pdf.
+    // opts: dpi (pixels per inch for this file; the figure's own by default;
+    // a PDF is vector graphics, so it has none)
     savefig(path, opts = nil) {
         dot = path lastIndexOf(".")
         ext = ((dot == nil) || (dot < 0)) ifTrue { "" } ifFalse { path slice(dot + 1, path length) lower }
@@ -98,7 +99,11 @@ PlotFigure = Object clone {
             File write(path, toPng(dpiFor))
             return path
         }
-        raise("Plot: savefig can't write \"" + path + "\": use a .png or .svg file name")
+        (ext == "pdf") ifTrue {
+            File write(path, toPdf)
+            return path
+        }
+        raise("Plot: savefig can't write \"" + path + "\": use a .png, .svg or .pdf file name")
     }
 
     // The figure as an SVG document (a String), e.g. to serve from a web app
@@ -119,6 +124,29 @@ PlotFigure = Object clone {
             cv = PlotPng new(width, height, facecolor)
             render(cv)
             cv finish
+        }
+    }
+
+    // The figure as a PDF file's bytes (a String): one page the figure's size
+    toPdf() {
+        doc = Pdf new([widthIn * 72, heightIn * 72])
+        drawPdf(doc addPage, 0, 0)
+        doc render
+    }
+
+    // Draw the figure on a page of a Pdf (pdf brick) with its top-left corner
+    // at (x, y), in points; width scales it (default: its size in inches at
+    // 72 points per inch). Returns the height it takes, to go on below it:
+    //   y = y + fig drawPdf(page, 72, y, 468)
+    drawPdf(page, x, y, width = nil) {
+        _withDpi(72) {
+            w = self width
+            h = self height
+            scale = (width == nil) ifTrue { 1 } ifFalse { width / (w * 1.0) }
+            cv = PlotPdf new(page, w, h, facecolor, x, y, scale)
+            render(cv)
+            cv finish
+            h * scale
         }
     }
 
