@@ -77,6 +77,11 @@ fig savefig("subplots.svg")
 | `plt.plot(pd.to_datetime(dates), y)` | `Plot plot(dates, y)`, with `Date`s or `"2024-03-15"` text |
 | `ani = FuncAnimation(fig, update, frames=60, interval=50)`, `ani.save("a.gif")` | `anim = Plot animate(fig, 60, { \|i\| ... }, #{interval: 50})`, `anim save("a.gif")` |
 | `ax.clear()`, `plt.cla()` | `ax clear`, `Plot cla` |
+| `plt.fill(x, y)`, `plt.fill_betweenx(y, x1, x2)` | `Plot fill(x, y)`, `Plot fillBetweenx(y, x1, x2)` |
+| `plt.pcolormesh(X, Y, C, cmap="RdBu")` | `Plot pcolormesh(X, Y, C, #{cmap: "RdBu"})` |
+| `plt.quiver(X, Y, U, V, C)` | `Plot quiver(X, Y, U, V, C)` |
+| `ax = plt.subplot(projection="polar")`, `plt.polar(t, r)` | `ax = Plot subplot(1, 1, 1, #{projection: "polar"})`, `Plot polar(t, r)` |
+| `ax.set_theta_zero_location("N")`, `ax.set_theta_direction(-1)` | `ax setThetaZeroLocation("N")`, `ax setThetaDirection(-1)` |
 | `plt.rcParams["font.size"] = 12` | `Plot rc set("font.size", 12)` |
 | `plt.savefig("f.png", dpi=150)`, `plt.show()`, `plt.close()` | `Plot savefig("f.png", #{dpi: 150})`, `Plot show`, `Plot close` |
 
@@ -100,6 +105,10 @@ return the artist they add, a Dict (`line get("color")`, `line set("label", "new
 | `barh(ys, widths, opts)` | Horizontal bars; `height` and `left` instead of `width` and `bottom`. Category labels read top to bottom. |
 | `hist(values, bins, opts)` | A histogram. `bins` is a count (10) or an Array of edges. Options: `bins`, `range: [lo, hi]`, `density`, `histtype` (`"bar"` or `"step"`), `color`, `alpha`, `label`. Returns `[counts, edges, artist]`. |
 | `fillBetween(xs, y1, y2, opts)` | Shades between two curves (`y2` is 0 if left out, or a number). `color`, `alpha`, `edgecolor`, `label`. |
+| `fillBetweenx(ys, x1, x2, opts)` | The same across: between two curves of x over y. |
+| `fill(xs, ys, opts)` | A filled polygon through the points (closed for you), or several: `fill([xs1, xs2], [ys1, ys2])`. `color`, `alpha`, `edgecolor`, `linewidth`, `label`. |
+| `pcolormesh(C)`, `pcolormesh(X, Y, C, opts)` | A grid of coloured cells, `C` as rows (row 0 at the bottom). `X` and `Y` are the cells' edges (one more than `C`'s columns and rows), or their centres, or mesh grids of the corners for cells that aren't rectangles. `cmap`, `vmin`, `vmax`, `alpha`, `edgecolors`, `linewidth`; `nil` and `nan` cells are empty. `pcolor` is the same. |
+| `quiver(U, V)`, `quiver(X, Y, U, V, C, opts)` | Arrows of a vector field. `U`, `V` as rows (`X`, `Y` one value per column / row, mesh grids, or left out) or flat lists (`X`, `Y` the points); `C` colours them through `cmap`. `scale` is the vector length per data unit (by default the longest arrow is about a grid step), `width` (points, 1.5), `headwidth`, `headlength`, `pivot` (`"tail"`, `"mid"`, `"tip"`), `color`, `alpha`, `label`. |
 | `step(xs, ys, fmt, opts)` | A step line. `where`: `"pre"` (the default), `"post"` or `"mid"`; and `plot`'s options. |
 | `errorbar(xs, ys, opts)` | Points or a line with error bars. `yerr`, `xerr`: a number, one per point, or `[lows, highs]`; `fmt` (`"o"`, `"s--"`; `"none"` for bars only), `capsize` (points), `ecolor`, `elinewidth`, and `plot`'s options. Returns `[line, bars]`. |
 | `axhline(y, opts)`, `axvline(x, opts)` | A line across the whole axes. `color`, `linestyle`, `linewidth`, `alpha`, `label`. |
@@ -144,6 +153,7 @@ return the artist they add, a Dict (`line get("color")`, `line set("label", "new
 | `Plot subplots(rows, cols, opts)` | A new figure with a grid of axes: `[fig, axs]`. As in matplotlib, `axs` is one axes for 1 x 1, an Array for one row or column, and an Array of rows otherwise. `sharex`, `sharey`: `true` (all the axes), `"col"` or `"row"` share one range and scale (`xlim`, `xscale` on one set them all), and inner tick labels are left out: x labels but the bottom row's when columns share, y labels but the first column's when rows share. |
 | `Plot subplotMosaic(layout, opts)` | A new figure of named axes, as matplotlib's `subplot_mosaic`: `layout` has a String a row (a character a cell; `"."` is empty) or Arrays of names; a name filling a rectangle of cells is one axes over all of them. Returns `[fig, axs]`, `axs` a Dict by name. |
 | `Plot subplot(rows, cols, index)` | Make the axes at `index` (1-based, along rows) of the current figure current, adding it if needed |
+| `projection: "polar"` | In `Plot subplots(..., opts)`, `Plot subplot(r, c, i, opts)` and `fig addSubplot`: polar axes (below). `Plot polar(thetas, rs, fmt, opts)` plots on them, as pyplot's `polar`. |
 | `Plot subplot2grid(shape, loc, opts)` | An axes spanning cells, as matplotlib's `subplot2grid`: `[rows, cols]`, the top left cell `[row, col]` (0-based), `#{rowspan:, colspan:}` |
 | `fig legend(opts)`, `Plot figlegend(opts)` | One legend for all the axes (each label once). `loc`: the corners, sides and centre of the figure, or `"outside right"`, `"outside left"`, `"outside upper center"`, `"outside lower center"` (and `"outside right upper"` / `"outside right lower"`), beside the axes, which make room for it. Also `ncol`, `title`, `fontsize`. |
 | `Plot gcf`, `Plot gca`, `Plot sca(ax)` | The current figure and axes; make an axes current |
@@ -262,6 +272,42 @@ their letters as they are; and `-` is a minus sign. It works in every text: titl
 tick labels, legends, annotations. `\$` is a dollar sign, and a lone `$` is just text. In Clay
 strings a backslash is written `\\`, so `"$\\sigma^2$"` is matplotlib's `r"$\sigma^2$"`.
 
+## Fields and polar axes
+
+Polygons, meshes of cells and vector fields, from [`examples/fields.clay`](examples/fields.clay):
+
+```clay norun
+ax fill(xs, ys, #{alpha: 0.5})
+ax pcolormesh(X, Y, C, #{cmap: "RdBu", edgecolors: "white"})    // X, Y: edges, centres or mesh grids
+ax quiver(xs, ys, U, V, speed, #{cmap: "plasma"})
+```
+
+![Fills, meshes and a vector field](docs/images/fields.png)
+
+Polar axes take angles in radians and radii. Lines and fills go straight between their points
+(as matplotlib's), bars become wedges, and `xticks` names the spokes, which makes radar charts
+and wind roses:
+
+```clay norun
+[fig, axs] = Plot subplots(2, 2, #{projection: "polar"})
+ax setThetaZeroLocation("N")                  // 0 at the top
+ax setThetaDirection(-1)                      // clockwise
+ax xticks(angles, ["speed", "accuracy", "memory", "latency", "cost"])
+ax fill(angles, values, #{alpha: 0.25})       // a radar chart
+ax bar(directions, counts, #{width: 0.39})    // a wind rose
+```
+
+![Polar axes](docs/images/polar.png)
+
+| Polar axes | |
+|---|---|
+| `setThetaZeroLocation(loc, offset)` | Where angle 0 points: `"E"` (the default), `"N"`, `"W"`, `"S"` or between (`"NE"`), plus an offset in degrees |
+| `setThetaDirection(d)` | 1: angles grow anticlockwise (the default); -1: clockwise |
+| `setRmax(r)`, `ylim(0, r)`, `rlim(0, r)` | The radius at the edge (by default the data's, rounded up) |
+| `setRticks(values)`, `yticks(values)` | The radii marked with circles |
+| `setRlabelPosition(degrees)` | Where the radius labels sit (22.5) |
+| `xticks(angles, labels)`, `setThetagrids(degrees, labels)` | The spokes: angles in radians (or degrees) and their labels |
+
 ## Dates and densities
 
 Dates on the x axis, shaded spans, and many points as hexagons or a 2-D histogram, from
@@ -303,9 +349,13 @@ trained on Fashion-MNIST with clay-ann.
 | `roc(scores, targets, opts)` | ROC curves with their AUC. `scores` are numbers (higher: more likely positive) with targets 1/0 or true/false, or rows of class scores (one curve per class, one against the rest) with targets as class numbers or one-hot rows. `labels`, `label`, `chance` (`true`: the diagonal), `title`. Returns the curve, `#{fpr:, tpr:, thresholds:, auc:}`, or one per class. |
 | `precisionRecall(scores, targets, opts)` | Precision-recall curves with their average precision, the same way. Returns `#{precision:, recall:, thresholds:, ap:}` (or one per class). |
 | `decisionBoundary(model, inputs, labels, opts)` | What a classifier decides across the plane of its two inputs, with the data on top. `model` is a clay-ann network (anything with `predictBatch`), or a block from a row `[x, y]` to its outputs or class. With one output (a probability), the plane is shaded red to blue with a line at 0.5; with several, each class's region is filled in its colour. `labels` (optional): a class per row, or one-hot rows. Options: `resolution` (100 points a side), `margin` (0.1 of the data's span), `cmap` (`"RdBu"`), `classNames` (adds a legend), `s` (marker area). |
+| `embedding(rows, labels, opts)` | Rows of numbers (embeddings, a layer's outputs) in two dimensions by PCA, coloured by class, the axes labelled with the share of the variance they hold. `classNames` (a legend), `s`, `alpha`. Returns `pca`'s result. |
+| `Plot pca(rows, k, opts)` | Principal components (`PlotML pca`): `#{projected:, components:, explained:, mean:}`. Pure Clay: quick for up to a few hundred dimensions; fitted on `maxRows` rows at most (2000), every row projected. Data with its own `pca(k)` method is asked for it. |
+| `Plot weightHistograms(layers, opts)` | A new figure of one histogram per layer of weights, titled with their mean and standard deviation: a Dict of name to weights, an Array of them, or a network with `weights(i)` and `layerCount`. `bins` (40), `cols`, `range` (the same for every layer, to compare frames of a `Plot movie`), `title`. |
+| `overlay(image, heat, opts)` | A heatmap (a saliency map, activations) of any size, scaled smoothly to the image and blended over it. `cmap` (`"inferno"`), `alpha` (0.5), `vmin`, `vmax`, `imageCmap` (`"gray"`), `colorbar`. |
 | `Plot imageGrid(images, opts)` | A new figure of images, one per axes: rows, flat Arrays or `Image`s. `cols` (up to 10), `shape`, `cmap` (`"gray"`), `vmin`, `vmax`, `symmetric` (`true`: one range centred on 0 for all, with `"coolwarm"`, for weights and filters), `titles`, `predicted` and `actual` (class numbers or rows of scores: titled with the prediction, and the actual class in red when wrong), `labels` (class names), `title`, `size` (inches per image). Returns the figure. |
 
-All but `imageGrid` are axes methods too (`ax roc(...)`). `PlotML rocCurve(scores, targets)`,
+All but `imageGrid`, `pca` and `weightHistograms` are axes methods too (`ax roc(...)`). `PlotML rocCurve(scores, targets)`,
 `PlotML prCurve(scores, targets)` and `PlotML confusion(actual, predicted)` compute without
 drawing, and `PlotML argmax(row)` is the class a row of scores picks.
 
@@ -324,6 +374,18 @@ Plot confusionMatrix(net confusionMatrix(xTest, yTest), #{labels: names, normali
 ```
 
 ![A confusion matrix](docs/images/fashion_mnist_confusion.png)
+
+```clay
+probs = (net predictBatch(xTest)) toArray
+ax embedding(probs, labels, #{classNames: names})       // the outputs, by PCA
+ax overlay(image, heat)                                  // heat: e.g. occlusion, 7 x 7
+```
+
+![An embedding and a saliency map](docs/images/fashion_mnist_embedding.png)
+
+The saliency map is occlusion: blank each 4 x 4 patch of the image and see how much the
+network's probability for its guess drops (in `examples/fashion_mnist.clay`). It needs only
+`predict`, so it works with any model.
 
 ```clay
 net train(points, targets)                     // two inputs per row
@@ -480,6 +542,8 @@ images they enlarge, so a small image (a 28 x 28 `imshow`) is enlarged into bloc
 
 ## Limitations
 
+- Polar axes start their radius at 0 and have no log radius or twin axes; `quiver` points
+  arrows by their data units (matplotlib's `angles="xy"`).
 - Math text is a subset of matplotlib's: no stacked fractions, roots or matrices, and one font.
   PNG and SVG lack a few symbols (≠ ≈ ∂ ∇ √ ∫ → and others), drawn as `!=`, `~`, `d`...; PDF
   draws them, and Greek, in its Symbol font.
@@ -512,6 +576,7 @@ clay examples/statistics.clay
 clay examples/dates_density.clay
 clay examples/animation.clay
 clay examples/layout.clay
+clay examples/fields.clay
 ```
 
 `examples/fashion_mnist.clay` also needs clay-ann; its header says how to run it.
@@ -519,7 +584,9 @@ clay examples/layout.clay
 The code is in `src/`: `main.clay` (`Plot`, the pyplot-style functions and `rc`),
 `figure.clay` (`PlotFigure`: layout and saving), `axes.clay` (`PlotAxes`: artists, scales,
 ticks, legend, drawing), `ticks.clay` (`PlotTicks`: ticks, number formats, logarithms),
-`color.clay` (`PlotColor`), `ml.clay` (`PlotML`), `live.clay` (`PlotLive`), and the backends
+`color.clay` (`PlotColor`), `ml.clay` (`PlotML`), `live.clay` (`PlotLive`), `polar.clay`
+(`PlotPolarAxes`), `mathtext.clay` (`PlotMath`: `$...$` in text), `stats.clay`, `contour.clay`,
+`dates.clay` and `anim.clay`, and the backends
 `svg.clay` (`PlotSvg`), `png.clay` (`PlotPng`, on clay-image's `Canvas`), `pdf.clay`
 (`PlotPdf`, on a clay-pdf page) and `term.clay` (`PlotTerm`, text for terminals). Axes
 draw through a handful of primitives (`line`, `polyline`, `polygon`, `rect`, `circle`, `text`,

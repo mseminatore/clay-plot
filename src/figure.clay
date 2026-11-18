@@ -48,7 +48,7 @@ PlotFigure = Object clone {
         rows times { |r|
             row = []
             cols times { |c|
-                ax = PlotAxes new(self, [rows, cols, r, c])
+                ax = _newAxes([rows, cols, r, c], opts)
                 axesList append(ax)
                 row append(ax)
             }
@@ -64,16 +64,27 @@ PlotFigure = Object clone {
         grid
     }
 
+    // A new axes in a grid cell: polar with #{projection: "polar"}
+    _newAxes(where, opts) {
+        proj = (opts == nil) ifTrue { nil } ifFalse { opts get("projection") ?? ((opts get("subplot_kw") ?? #{}) get("projection")) }
+        ((proj == nil) || (proj == "rectilinear")) ifTrue { return PlotAxes new(self, where) }
+        (proj != "polar") ifTrue { raise("Plot: projection \"" + proj toString + "\": \"polar\" or \"rectilinear\"") }
+        ax = PlotPolarAxes new(self, where)
+        ax gridOn = true
+        ax
+    }
+
     // The axes at position index (1-based, left to right then down) of a
-    // rows x cols grid, made if it isn't there yet (matplotlib's add_subplot)
-    addSubplot(rows = 1, cols = 1, index = 1) {
+    // rows x cols grid, made if it isn't there yet (matplotlib's add_subplot).
+    // opts: projection ("polar")
+    addSubplot(rows = 1, cols = 1, index = 1, opts = nil) {
         (index < 1 || index > rows * cols) ifTrue { raise("Plot: subplot index " + index toString + " is outside a " + rows toString + " x " + cols toString + " grid") }
         r = (index - 1) / cols
         c = (index - 1) % cols
         where = [rows, cols, r, c, 1, 1]
         found = axesList find { |ax| ax cell == where }
         (found != nil) ifTrue { return found }
-        ax = PlotAxes new(self, where)
+        ax = _newAxes(where, opts)
         axesList append(ax)
         ax
     }

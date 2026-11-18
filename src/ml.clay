@@ -436,6 +436,255 @@ PlotML = Object clone {
         #{positives: ps size, negatives: ns size, steps: steps}
     }
 
+    // ---- embeddings, weights, saliency ---------------------------------------
+
+    // Principal components of rows of numbers (embeddings, a layer's
+    // activations): #{projected: rows of k numbers, components: k unit
+    // vectors, explained: the fraction of the variance each holds, mean:}.
+    // Rows with something else than numbers are an error. Data with its own
+    // pca (k) method (a native one) is asked for it. Pure Clay otherwise,
+    // by power iteration: fitted on maxRows rows at most (2000; evenly
+    // spaced), which is quick for tens to a few hundred dimensions; every row
+    // is projected. opts: maxRows, iterations (60)
+    pca(data, k = 2, opts = nil) {
+        (k type == "Dict") ifTrue { opts = k; k = 2 }
+        o = opts ?? #{}
+        (data hasMethod("pca")) ifTrue { return data pca(k) }
+        rows = (data type == "Array") ifTrue { data } ifFalse { data toArray }
+        n = rows size
+        (n < 2) ifTrue { raise("Plot: pca needs at least 2 rows") }
+        d = rows first size
+        ((rows find { |r| (r type != "Array") || (r size != d) }) != nil) ifTrue { raise("Plot: pca needs rows of numbers, all the same length") }
+        (k > d) ifTrue { raise("Plot: pca: " + k toString + " components from " + d toString + " dimensions") }
+        // the rows it is fitted on: all, or evenly spaced ones
+        most = o get("maxRows") ?? 2000
+        fit = (n <= most) ifTrue { rows } ifFalse { (0..(most - 1)) map { |i| rows at((i * n) / most) } }
+        m = fit size
+        mean = (0..(d - 1)) map { |j| 0.0 }
+        fit each { |r| j = 0; { j < d } whileTrue { mean setAt(j, mean at(j) + r at(j)); j = j + 1 } }
+        mean = mean map { |v| v / m }
+        xs = fit map { |r| out = []; j = 0; { j < d } whileTrue { out append(r at(j) - mean at(j)); j = j + 1 }; out }
+        total = 0.0
+        xs each { |r| j = 0; { j < d } whileTrue { total = total + (r at(j) * r at(j)); j = j + 1 } }
+        total = total / (m - 1)
+        // w = X^T X v: from the covariance matrix when there are few
+        // dimensions (made once, then each step costs d * d), else from the
+        // rows each step (n * d)
+        small = d <= 64
+        cov = nil
+        small ifTrue {
+            cov = (0..(d - 1)) map { |j| (0..(d - 1)) map { |l| 0.0 } }
+            xs each { |r|
+                j = 0
+                { j < d } whileTrue {
+                    rj = r at(j)
+                    row = cov at(j)
+                    l = j
+                    { l < d } whileTrue { row setAt(l, row at(l) + (rj * r at(l))); l = l + 1 }
+                    j = j + 1
+                }
+            }
+            d times { |j| (0..(j - 1)) each { |l| (j > 0) ifTrue { cov at(j) setAt(l, cov at(l) at(j)) } } }
+        }
+        times = { |v|
+            w = (0..(d - 1)) map { |j| 0.0 }
+            small ifTrue {
+                j = 0
+                { j < d } whileTrue {
+                    row = cov at(j)
+                    s = 0.0
+                    l = 0
+                    { l < d } whileTrue { s = s + (row at(l) * v at(l)); l = l + 1 }
+                    w setAt(j, s)
+                    j = j + 1
+                }
+            } ifFalse {
+                xs each { |r|
+                    s = 0.0
+                    j = 0
+                    { j < d } whileTrue { s = s + (r at(j) * v at(j)); j = j + 1 }
+                    j = 0
+                    { j < d } whileTrue { w setAt(j, w at(j) + (s * r at(j))); j = j + 1 }
+                }
+            }
+            w
+        }
+        // steps on the small matrix are cheap: take as many as close eigenvalues need
+        iters = o get("iterations") ?? (small ifTrue { 1000 } ifFalse { 60 })
+        comps = []
+        vars = []
+        seed = 12345
+        k times { |c|
+            v = (0..(d - 1)) map { |j| seed = (seed * 48271) % 2147483647; (seed / 2147483647.0) - 0.5 }
+            lam = 0.0
+            done = false
+            it = 0
+            { (it < iters) && (done not) } whileTrue {
+                // less what the components found already explain
+                w = times value(v)
+                comps each { |p|
+                    dp = 0.0
+                    j = 0
+                    { j < d } whileTrue { dp = dp + (w at(j) * p at(j)); j = j + 1 }
+                    j = 0
+                    { j < d } whileTrue { w setAt(j, w at(j) - (dp * p at(j))); j = j + 1 }
+                }
+                norm = Math sqrt(w reduce(0.0) { |a, x| a + (x * x) })
+                (norm == 0) ifTrue { done = true } ifFalse {
+                    nv = w map { |x| x / norm }
+                    change = 0.0
+                    j = 0
+                    { j < d } whileTrue { change = change + (nv at(j) - v at(j)) abs; j = j + 1 }
+                    v = nv
+                    lam = norm / (m - 1)
+                    (change < 0.00001) ifTrue { done = true }
+                    it = it + 1
+                }
+            }
+            // a fixed sign: the largest entry positive
+            big = 0
+            d times { |j| ((v at(j) abs) > (v at(big) abs)) ifTrue { big = j } }
+            (v at(big) < 0) ifTrue { v = v map { |x| 0 - x } }
+            comps append(v)
+            vars append(lam)
+        }
+        projected = rows map { |r|
+            comps map { |p|
+                s = 0.0
+                j = 0
+                { j < d } whileTrue { s = s + ((r at(j) - mean at(j)) * p at(j)); j = j + 1 }
+                s
+            }
+        }
+        #{projected: projected, components: comps, mean: mean,
+          explained: vars map { |v| (total > 0) ifTrue { v / total } ifFalse { 0 } }}
+    }
+
+    // Rows of numbers in two dimensions by PCA, as a scatter coloured by
+    // class: embedding(ax, rows, labels, opts). labels: a class per row (or
+    // one-hot rows), or nil. opts: classNames (a legend), s, alpha, and
+    // pca's maxRows, iterations. Returns pca's result.
+    embedding(ax, rows, labels, opts) {
+        p = pca(rows, 2, opts)
+        pts = p get("projected")
+        xs = pts map { |r| r at(0) }
+        ys = pts map { |r| r at(1) }
+        names = opts get("classNames")
+        (labels == nil) ifTrue {
+            ax scatter(xs, ys, #{s: opts get("s") ?? 12, alpha: opts get("alpha") ?? 0.7})
+        } ifFalse {
+            lab = ax _seq(labels) map { |l| (l type == "Array") ifTrue { argmax(l) } ifFalse { Math round(l) } }
+            (lab size != pts size) ifTrue { raise("Plot: embedding: " + pts size toString + " rows but " + lab size toString + " labels") }
+            (lab max + 1) times { |c|
+                idx = (0..(lab size - 1)) filter { |i| lab at(i) == c }
+                (idx size > 0) ifTrue {
+                    ax scatter(idx map { |i| xs at(i) }, idx map { |i| ys at(i) },
+                               #{s: opts get("s") ?? 12, alpha: opts get("alpha") ?? 0.7, color: PlotColor cycleColor(c),
+                                 label: (names != nil) ifTrue { (names at(c) ?? c) toString } ifFalse { c toString }})
+                }
+            }
+            ax legend(#{loc: "best", title: opts get("legendTitle")})
+        }
+        ev = p get("explained")
+        ax xlabel("PC1 (" + PlotTicks format(ev at(0) * 100, 0) + "%)")
+        ax ylabel("PC2 (" + PlotTicks format(ev at(1) * 100, 0) + "%)")
+        p
+    }
+
+    // A figure of one histogram per layer of weights: layers is a Dict (name
+    // -> numbers, or rows of them), an Array of those, or a network with
+    // weights(i) and layerCount (as clay-ann's may offer). Each title gives
+    // the mean and standard deviation. opts: bins (40), cols (up to 4),
+    // range ([lo, hi] for every layer, to compare frames of an animation),
+    // color, figsize, title. Returns the figure.
+    weightHistograms(layers, opts) {
+        named = _layers(layers)
+        n = named size
+        (n == 0) ifTrue { raise("Plot: weightHistograms needs at least one layer of weights") }
+        cols = Math min(opts get("cols") ?? 4, n)
+        rows = (n + cols - 1) / cols
+        fig = Plot figure(#{figsize: opts get("figsize") ?? [3.2 * cols, 2.6 * rows]})
+        n times { |i|
+            ax = fig addSubplot(rows, cols, i + 1)
+            Plot sca(ax)
+            vals = (named at(i) at(1)) filter { |v| (v != nil) && (v == v) }
+            h = #{color: opts get("color") ?? "C0"}
+            (opts get("range") != nil) ifTrue { h set("range", opts get("range")) }
+            ax hist(vals, opts get("bins") ?? 40, h)
+            mean = PlotStats mean(vals) ?? 0
+            sd = PlotStats std(vals)
+            ax title(named at(i) at(0) + ": $\\mu$ " + PlotTicks short(mean, 3) + ", $\\sigma$ " + PlotTicks short(sd, 3), #{fontsize: 9})
+        }
+        (opts get("title") != nil) ifTrue { fig suptitle(opts get("title")) }
+        fig
+    }
+
+    // [[name, flat numbers], ...] from a Dict, an Array or a network
+    _layers(layers) {
+        flat = { |v| ((v type == "Array") && (v size > 0) && (v first type == "Array")) ifTrue { v flatten } ifFalse {
+            (v type == "Array") ifTrue { v } ifFalse { v toArray flatten } } }
+        (layers type == "Dict") ifTrue {
+            out = []
+            layers each { |k, v| out append([k toString, flat value(v)]) }
+            return out
+        }
+        (layers type == "Array") ifTrue {
+            return (0..(layers size - 1)) map { |i| ["layer " + (i + 1) toString, flat value(layers at(i))] }
+        }
+        ((layers hasMethod("weights")) && (layers hasMethod("layerCount"))) ifTrue {
+            out = []
+            layers layerCount times { |i|
+                w = layers weights(i)
+                (w != nil) ifTrue { out append(["layer " + (i + 1) toString, flat value(w)]) }
+            }
+            return out
+        }
+        raise("Plot: weightHistograms takes a Dict of name -> weights, an Array of weights, or a network with weights(i)")
+    }
+
+    // A heatmap over an image (a saliency map, a layer's activations):
+    // overlay(ax, image, heat, opts). image is as imshow's (rows, an Image);
+    // heat is rows of numbers of any size, scaled smoothly to the image's.
+    // opts: cmap ("jet"-like "inferno" by default), alpha (0.5), vmin, vmax,
+    // imageCmap ("gray"), colorbar (true). Returns the heatmap's artist.
+    overlay(ax, image, heat, opts) {
+        base = ax imshow(image, #{cmap: opts get("imageCmap") ?? "gray"})
+        nr = base get("nrows")
+        nc = base get("ncols")
+        h = ax _grid(heat, opts get("shape"))
+        up = _resample(h, nr, nc)
+        o = #{cmap: opts get("cmap") ?? "inferno", alpha: opts get("alpha") ?? 0.5, extent: base get("extent")}
+        (opts get("vmin") != nil) ifTrue { o set("vmin", opts get("vmin")) }
+        (opts get("vmax") != nil) ifTrue { o set("vmax", opts get("vmax")) }
+        art = ax imshow(up, o)
+        ax integerX = true
+        ax integerY = true
+        (opts get("colorbar") != false) ifTrue { ax colorbar(art) }
+        art
+    }
+
+    // Rows of numbers resized to nr x nc by bilinear interpolation
+    _resample(rows, nr, nc) {
+        hr = rows size
+        hc = rows first size
+        ((hr == nr) && (hc == nc)) ifTrue { return rows }
+        (0..(nr - 1)) map { |i|
+            fy = ((i + 0.5) * hr / nr toFloat) - 0.5
+            y0 = Math floor(fy) clamp(0, hr - 1)
+            y1 = (y0 + 1) clamp(0, hr - 1)
+            ty = (fy - y0) clamp(0, 1)
+            (0..(nc - 1)) map { |j|
+                fx = ((j + 0.5) * hc / nc toFloat) - 0.5
+                x0 = Math floor(fx) clamp(0, hc - 1)
+                x1 = (x0 + 1) clamp(0, hc - 1)
+                tx = (fx - x0) clamp(0, 1)
+                a = (rows at(y0) at(x0) * (1 - tx)) + (rows at(y0) at(x1) * tx)
+                b = (rows at(y1) at(x0) * (1 - tx)) + (rows at(y1) at(x1) * tx)
+                (a * (1 - ty)) + (b * ty)
+            }
+        }
+    }
+
     // ---- grids of images --------------------------------------------------
 
     // A figure of images, one per axes: images are rows, flat Arrays (with

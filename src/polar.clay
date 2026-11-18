@@ -1,0 +1,308 @@
+// PlotPolarAxes -- axes in polar coordinates: angle (radians) and radius
+//
+//   ax = Plot subplot(1, 1, 1, #{projection: "polar"})
+//   ax plot(thetas, rs)                  // straight between points, as matplotlib
+//   ax fill(thetas, rs, #{alpha: 0.3})   // a radar chart's area
+//   ax bar(thetas, rs, #{width: 0.4})    // wedges (a wind rose)
+//   ax setThetaZeroLocation("N"); ax setThetaDirection(-1)   // a compass
+//
+// An axes like any other, whose artists are turned from (angle, radius)
+// into x and y as they are added (and again if the zero angle or direction
+// changes), so all the drawing is the ordinary axes'. The view is a square
+// around the circle of the largest radius; the frame is that circle, with
+// the angles round it and circles for the radii.
+
+PlotPolarAxes = PlotAxes clone {
+    aspect = "equal"
+    gridOn = true
+    thetaZero = 0.0         // where angle 0 points, radians anticlockwise from east
+    thetaDir = 1            // 1: angles grow anticlockwise; -1: clockwise
+    rmaxSet = nil           // the radius at the edge; nil: from the data
+    rtickSpec = nil         // radii to mark, or nil: chosen
+    rlabelAngle = 22.5      // degrees: where the radius labels sit
+    thetaSpec = nil         // #{values: (radians), labels:}, or nil: every 45 degrees
+
+    // ---- settings ---------------------------------------------------------
+
+    // Where angle 0 points: "E" (the default), "N", "W", "S", "NE" ...; and
+    // an offset in degrees, as matplotlib's set_theta_zero_location
+    setThetaZeroLocation(loc, offset = 0) {
+        dirs = #{E: 0, NE: 45, N: 90, NW: 135, W: 180, SW: 225, S: 270, SE: 315}
+        deg = dirs get(loc)
+        (deg == nil) ifTrue { raise("Plot: setThetaZeroLocation: \"E\", \"N\", \"W\", \"S\" or between, not " + loc toString) }
+        self thetaZero = ((deg + offset) * Math pi) / 180
+        _repolarize
+    }
+
+    // 1: angles grow anticlockwise (the default); -1: clockwise
+    setThetaDirection(d) {
+        ((d != 1) && (d != -1)) ifTrue { raise("Plot: setThetaDirection takes 1 or -1") }
+        self thetaDir = d
+        _repolarize
+    }
+
+    // The radius at the edge of the plot (rlim(0, r) and ylim(0, r) too)
+    setRmax(r) { self rmaxSet = r; self }
+    rlim(lo = nil, hi = nil) { ylim(lo, hi) }
+    ylim(lo = nil, hi = nil) {
+        ((lo == nil) && (hi == nil)) ifTrue { return [0, _rmax] }
+        (lo type == "Array") ifTrue { hi = lo at(1); lo = lo at(0) }
+        self rmaxSet = hi ?? lo
+        self
+    }
+
+    // The radii marked with circles and labels
+    setRticks(values) { self rtickSpec = _seq(values); self }
+
+    // Where the radius labels go, in degrees round the circle
+    setRlabelPosition(deg) { self rlabelAngle = deg; self }
+
+    // The angles marked, in degrees, with labels (matplotlib's set_thetagrids)
+    setThetagrids(degrees, labels = nil) {
+        ds = _seq(degrees)
+        self thetaSpec = #{values: ds map { |d| (d * Math pi) / 180 }, labels: (labels == nil) ifTrue { ds map { |d| PlotTicks short(d) + "°" } } ifFalse { _seq(labels) map { |s| s toString } }}
+        self
+    }
+
+    // xticks are angles (radians) here: xticks(angles, labels), as matplotlib's
+    xticks(values = nil, labels = nil, opts = nil) {
+        (values == nil) ifTrue { return self }
+        vs = _seq(values)
+        self thetaSpec = #{values: vs, labels: (labels == nil) ifTrue { vs map { |v| PlotTicks short((v * 180) / Math pi) + "°" } } ifFalse { _seq(labels) map { |s| s toString } }}
+        self
+    }
+
+    // yticks are radii here
+    yticks(values = nil, labels = nil, opts = nil) { (values != nil) ifTrue { setRticks(values) }; self }
+
+    // ---- turning (angle, radius) into x, y --------------------------------
+
+    _toXY(theta, r) {
+        a = thetaZero + (thetaDir * theta)
+        [r * Math cos(a), r * Math sin(a)]
+    }
+
+    // Keep each artist's (angle, radius) and set its x, y from them
+    _adopt(art) {
+        k = art get("kind")
+        (k == "line") ifTrue { art set("polarSrc", [art get("xs"), art get("ys")]) }
+        (k == "scatter") ifTrue { art set("polarSrc", [art get("xs"), art get("ys")]) }
+        (k == "polygon") ifTrue { art set("polarSrc", art get("polys")) }
+        (k == "text") ifTrue { art set("polarSrc", [art get("x"), art get("y")]) }
+        (k == "annotation") ifTrue { art set("polarSrc", [art get("xy"), art get("xytext")]) }
+        (k == "bars") ifTrue {
+            (art get("orient") != "v") ifTrue { raise("Plot: polar axes draw bar (wedges), not barh") }
+            art set("polarSrc", #{pos: art get("pos"), lengths: art get("lengths"), width: art get("width"),
+                                  bottom: art get("bottom"), align: art get("align")})
+            art set("kind", "polygon")
+        }
+        _polarize(art)
+        art
+    }
+
+    _repolarize() {
+        artists each { |a| (a get("polarSrc") != nil) ifTrue { _polarize(a) } }
+        self
+    }
+
+    _polarize(art) {
+        src = art get("polarSrc")
+        k = art get("kind")
+        (k == "line") ifTrue {
+            [th, r] = src
+            [xs, ys] = _arcs(th, r, false)
+            art set("xs", xs)
+            art set("ys", ys)
+            // markers at the points given, not the arcs' steps
+            art set("mxs", (0..(th size - 1)) map { |i| _point(th at(i), r at(i)) at(0) })
+            art set("mys", (0..(th size - 1)) map { |i| _point(th at(i), r at(i)) at(1) })
+            return art
+        }
+        (k == "scatter") ifTrue {
+            [th, r] = src
+            art set("xs", (0..(th size - 1)) map { |i| _point(th at(i), r at(i)) at(0) })
+            art set("ys", (0..(th size - 1)) map { |i| _point(th at(i), r at(i)) at(1) })
+            return art
+        }
+        (k == "polygon") ifTrue {
+            (src type == "Dict") ifTrue { art set("polys", _wedges(src)); return art }
+            art set("polys", src map { |pp| _arcs(pp at(0), pp at(1), true) })
+            return art
+        }
+        (k == "text") ifTrue {
+            (art get("transform") != "axes") ifTrue {
+                p = _point(src at(0), src at(1))
+                art set("x", p at(0))
+                art set("y", p at(1))
+            }
+            return art
+        }
+        (k == "annotation") ifTrue {
+            (art get("xycoords") == "data") ifTrue { art set("xy", _point(src at(0) at(0), src at(0) at(1))) }
+            (art get("textcoords") == "data") ifTrue { art set("xytext", _point(src at(1) at(0), src at(1) at(1))) }
+        }
+        art
+    }
+
+    // x, y of one point (nil for a missing one)
+    _point(theta, r) {
+        (_ok(theta) && _ok(r)) ifFalse { return [nil, nil] }
+        _toXY(theta, r)
+    }
+
+    // Points (angle, radius) as x, y. Lines and fills go straight between
+    // their points, as matplotlib's do on polar axes (only bars and the grid
+    // follow arcs); a missing value leaves a gap.
+    _arcs(th, r, closed) {
+        xs = []
+        ys = []
+        th size times { |i|
+            p = _point(th at(i), r at(i))
+            xs append(p at(0)); ys append(p at(1))
+        }
+        [xs, ys]
+    }
+
+    // Bars as wedges: from bottom to bottom + length, over width radians
+    _wedges(src) {
+        out = []
+        pos = src get("pos")
+        pos size times { |i|
+            w = _nth(src get("width"), i)
+            base = _nth(src get("bottom"), i) ?? 0
+            len = src get("lengths") at(i)
+            t0 = (src get("align") == "edge") ifTrue { pos at(i) } ifFalse { pos at(i) - (w / 2.0) }
+            t1 = t0 + w
+            steps = Math max(2, Math ceil((w * 180) / (Math pi * 2)) toInt)
+            xs = []
+            ys = []
+            (0..steps) each { |s| p = _toXY(t0 + ((w * s) / steps), base + len); xs append(p at(0)); ys append(p at(1)) }
+            (0..steps) each { |s| p = _toXY(t1 - ((w * s) / steps), base); xs append(p at(0)); ys append(p at(1)) }
+            out append([xs, ys])
+        }
+        out
+    }
+
+    // ---- view, ticks and frame --------------------------------------------
+
+    // The largest radius the artists reach
+    _rData() {
+        top = 0.0
+        artists each { |a|
+            src = a get("polarSrc")
+            (src != nil) ifTrue {
+                k = a get("kind")
+                ((k == "line") || (k == "scatter")) ifTrue { src at(1) each { |v| (_ok(v)) ifTrue { top = Math max(top, v) } } }
+                ((k == "polygon") && (src type == "Array")) ifTrue { src each { |pp| pp at(1) each { |v| (_ok(v)) ifTrue { top = Math max(top, v) } } } }
+                ((k == "polygon") && (src type == "Dict")) ifTrue {
+                    src get("lengths") size times { |i| top = Math max(top, (_nth(src get("bottom"), i) ?? 0) + src get("lengths") at(i)) }
+                }
+            }
+        }
+        top
+    }
+
+    // The radius at the edge: set, or the data's rounded up to a tick
+    _rmax() {
+        (rmaxSet != nil) ifTrue { return rmaxSet }
+        top = _rData
+        (top <= 0) ifTrue { return 1.0 }
+        t = PlotTicks locate(0, top, 4)
+        v = t get("values") last
+        (v < top - (top * 0.0001)) ifTrue { v = v + t get("step") }
+        v
+    }
+
+    _view() {
+        r = _rmax toFloat
+        [0 - r, r, 0 - r, r]
+    }
+
+    _computeTicks(cv, w, h) {
+        R = _rmax
+        rs = rtickSpec ?? ((PlotTicks locate(0, R, 4) get("values")) filter { |v| (v > 0) && (v <= R * 1.0001) })
+        t = PlotTicks locate(0, R, 4)
+        labels = (rtickSpec != nil) ifTrue { rs map { |v| PlotTicks short(v) } } ifFalse { PlotTicks labels(rs, t get("decimals")) }
+        self yt = #{values: rs, labels: labels, rotation: 0}
+        th = thetaSpec ?? #{values: (0..7) map { |i| (i * Math pi) / 4 }, labels: (0..7) map { |i| (i * 45) toString + "°" }}
+        self xt = #{values: th get("values"), labels: th get("labels"), rotation: 0}
+    }
+
+    // The title goes above the angle labels at the top
+    _twinTop(cv) { _pt(_rc("xtick.labelsize")) + _pt(8) }
+
+    // Room round the circle for the angle labels, and the title
+    _margins(cv, w, h) {
+        self view = _view
+        _computeTicks(cv, w, h)
+        fs = _pt(_rc("xtick.labelsize"))
+        widest = xt get("labels") reduce(0) { |m, s| Math max(m, cv measure(s, fs)) }
+        side = widest + _pt(8)
+        vert = fs + _pt(8)
+        top = vert
+        ta = _titleAxes
+        (ta != nil) ifTrue { top = top + (ta _titleSize * 1.25) + _pt(6) }
+        [side, top, side, vert]
+    }
+
+    // Circles at the radii and spokes at the angles
+    _drawGrid(cv) {
+        o = gridOpts ?? #{}
+        lw = _pt(o get("linewidth") ?? _rc("grid.linewidth"))
+        style = #{stroke: PlotColor hex(o get("color") ?? _rc("grid.color")), width: lw,
+                  dash: _dash(o get("linestyle") ?? "-", lw), alpha: o get("alpha") ?? _rc("grid.alpha")}
+        R = _rmax
+        yt get("values") each { |r| (r < R * 0.9999) ifTrue { _circle(cv, r, style) } }
+        xt get("values") each { |t|
+            p = _toXY(t, R)
+            cv line(_px(0), _py(0), _px(p at(0)), _py(p at(1)), style)
+        }
+    }
+
+    _circle(cv, r, style) {
+        n = 120
+        px = []
+        py = []
+        (0..n) each { |i|
+            a = (i * 2 * Math pi) / n
+            px append(_px(r * Math cos(a))); py append(_py(r * Math sin(a)))
+        }
+        cv polyline(px, py, style)
+    }
+
+    // The outer circle, the angle labels round it, the radius labels along
+    // one direction
+    _drawAxis(cv) {
+        R = _rmax
+        lw = _pt(_rc("axes.linewidth"))
+        _circle(cv, R, #{stroke: "#000000", width: lw})
+        fs = _pt(_rc("xtick.labelsize"))
+        rpx = (_px(R) - _px(0)) abs
+        xt get("values") size times { |i|
+            a = thetaZero + (thetaDir * xt get("values") at(i))
+            d = rpx + _pt(6)
+            x = _px(0) + (d * Math cos(a))
+            y = _py(0) - (d * Math sin(a))
+            c = Math cos(a)
+            s = Math sin(a)
+            anchor = (c > 0.3) ifTrue { "start" } ifFalse { (c < -0.3) ifTrue { "end" } ifFalse { "middle" } }
+            valign = (s > 0.3) ifTrue { "bottom" } ifFalse { (s < -0.3) ifTrue { "top" } ifFalse { "center" } }
+            cv text(x, y, xt get("labels") at(i), #{size: fs, anchor: anchor, valign: valign})
+        }
+        la = (rlabelAngle * Math pi) / 180
+        yt get("values") size times { |i|
+            p = [yt get("values") at(i) * Math cos(la), yt get("values") at(i) * Math sin(la)]
+            cv text(_px(p at(0)) + _pt(2), _py(p at(1)), yt get("labels") at(i), #{size: fs * 0.9, anchor: "start", valign: "bottom"})
+        }
+        ls = _pt(_rc("axes.labelsize"))
+        b = plotBox
+        (xlabelText != nil) ifTrue {
+            cv text(b at(0) + (b at(2) / 2), b at(1) + b at(3) + fs + _pt(10), xlabelText, #{size: ls, anchor: "middle", valign: "top"})
+        }
+    }
+
+    toString() {
+        (self == PlotPolarAxes) ifTrue { return "PlotPolarAxes" }
+        "PlotPolarAxes"
+    }
+}
