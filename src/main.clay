@@ -16,12 +16,13 @@
 // Plot keeps a current figure and axes, as pyplot does; the drawing methods
 // (plot, scatter, bar, hist, imshow ...) go to the current axes. Figures and
 // axes can also be used directly: PlotFigure, PlotAxes. Colours and
-// colormaps are in PlotColor, tick placement in PlotTicks, the statistics
-// behind box and violin plots in PlotStats, contour geometry in
-// PlotContour, and the backends
-// are PlotSvg, PlotPng (which draws on the image brick's Canvas) and
-// PlotTerm (text for terminals). PlotML has the machine-learning plots and
-// PlotLive the learning curve drawn as training runs.
+// colormaps are in PlotColor, tick placement in PlotTicks (and for dates in
+// PlotDates), the statistics behind box and violin plots in PlotStats,
+// contour geometry in PlotContour, and the backends are PlotSvg, PlotPng
+// (which draws on the image brick's Canvas) and PlotTerm (text for
+// terminals). PlotML has the machine-learning plots, PlotLive the learning
+// curve drawn as training runs, and PlotAnimation and PlotMovie animated
+// GIFs and PNGs.
 //
 // Every brick shares one set of top-level names with the program that imports
 // it, so this one's all start with Plot.
@@ -31,6 +32,7 @@ import("color.clay")
 import("ticks.clay")
 import("stats.clay")
 import("contour.clay")
+import("dates.clay")
 import("svg.clay")
 import("png.clay")
 import("term.clay")
@@ -38,6 +40,7 @@ import("axes.clay")
 import("figure.clay")
 import("ml.clay")
 import("live.clay")
+import("anim.clay")
 
 Plot = Object clone {
     current = nil
@@ -120,6 +123,10 @@ Plot = Object clone {
     scatter(x, y, opts = nil) { gca scatter(x, y, opts) }
     bar(x, height, opts = nil) { gca bar(x, height, opts) }
     barh(y, width, opts = nil) { gca barh(y, width, opts) }
+    axhspan(ymin, ymax, a = nil, b = nil, c = nil) { gca axhspan(ymin, ymax, a, b, c) }
+    axvspan(xmin, xmax, a = nil, b = nil, c = nil) { gca axvspan(xmin, xmax, a, b, c) }
+    hexbin(x, y, opts = nil) { gca hexbin(x, y, opts) }
+    hist2d(x, y, bins = nil, opts = nil) { gca hist2d(x, y, bins, opts) }
     hist(data, bins = nil, opts = nil) { gca hist(data, bins, opts) }
     fillBetween(x, y1, y2 = nil, opts = nil) { gca fillBetween(x, y1, y2, opts) }
     axhline(y = 0, opts = nil) { gca axhline(y, opts) }
@@ -153,6 +160,18 @@ Plot = Object clone {
     // A learning curve drawn in the terminal as training runs: pass it as
     // clay-ann fit's onEpoch. See PlotLive for the options.
     liveCurve(opts = nil) { PlotLive new(opts) }
+
+    // ---- animation (anim.clay) ----------------------------------------------
+
+    // An animation of fig, as matplotlib's FuncAnimation: update is called
+    // with each frame (a count, Range or Array) before it is drawn; then
+    // anim save("x.gif") or "x.png" (animated PNG). opts: interval (ms, 200)
+    // or fps, dpi, loop, repeat, colors
+    animate(fig, frames, update, opts = nil) { PlotAnimation new(fig, frames, update, opts) }
+
+    // A movie you add frames to: movie grab(fig) after each change, then
+    // movie save("x.gif"). opts: fps (10) or interval, dpi, loop, colors
+    movie(opts = nil) { PlotMovie new(opts) }
 
     // A new figure of images in a grid; see PlotML imageGrid for the options
     imageGrid(images, opts = nil) { PlotML imageGrid(images, opts ?? #{}) }
@@ -200,4 +219,7 @@ Plot = Object clone {
 
     // Clear the current figure's axes
     clf() { gcf clear; self currentAxes = nil; nil }
+
+    // Clear the current axes (keeping it in the figure)
+    cla() { gca clear; nil }
 }

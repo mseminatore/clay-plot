@@ -1,0 +1,70 @@
+// Dates and densities: time series on date axes (days, hours, years) with
+// shaded spans, then many points as hexagons and a 2-D histogram. Writes
+// examples/out/dates_density.png and .svg. Run from the brick's directory:
+// clay examples/dates_density.clay
+import("plot")
+
+// repeatable random numbers: a Lehmer generator, and normal values (Box-Muller)
+seed = 99
+uniform = { seed = (seed * 48271) % 2147483647; seed / 2147483647.0 }
+normal = { |mu, sd| mu + (sd * Math sqrt(-2 * Math log(uniform value)) * Math cos(2 * Math pi * uniform value)) }
+
+// "YYYY-MM-DD" for the day n days after 2024-01-01
+day = { |n|
+    c = PlotDates civilFromDays(PlotDates daysFromCivil(2024, 1, 1) + n)
+    c at(0) toString + "-" + c at(1) toString padLeft(2, "0") + "-" + c at(2) toString padLeft(2, "0")
+}
+
+[fig, axs] = Plot subplots(3, 2, #{figsize: [11, 12]})
+
+// a daily series over five months, a shaded holiday and a target band
+ax = axs at(0) at(0)
+days = (0..150) map { |i| day value(i) }
+level = 100.0
+visits = days map { |d| level = level + normal value(0.05, 2.5); level }
+ax plot(days, visits, #{label: "visits"})
+ax axvspan("2024-03-29", "2024-04-01", #{color: "orange", alpha: 0.3, label: "Easter"})
+ax axhspan(105, 115, #{color: "green", alpha: 0.15, label: "target"})
+ax legend(#{loc: "lower left"})
+ax title("Dates, axvspan and axhspan")
+
+// one day, every 15 minutes
+ax = axs at(0) at(1)
+times = (0..96) map { |i| "2024-06-15 " + (i / 4) toString padLeft(2, "0") + ":" + ((i % 4) * 15) toString padLeft(2, "0") }
+ax step(times, (0..96) map { |i| 18 + (5 * Math sin((i - 30) / 15.0)) + normal value(0, 0.3) })
+ax ylabel("°C")
+ax title("A day, every 15 minutes")
+
+// yearly values as bars (Date objects make a date axis; strings would be categories)
+ax = axs at(1) at(0)
+years = (1985..2024) map { |y| Date fromTimestamp((PlotDates daysFromCivil(y, 7, 1) * 86400) + 43200) }
+ax bar(years, (0..39) map { |i| 50 + (i * 1.5) + normal value(0, 6) }, #{width: 250})
+ax title("Bars on a date axis")
+
+// 20,000 correlated points: hexagons, coloured by log count
+ax = axs at(1) at(1)
+xs = []
+ys = []
+20000 times { |i| a = normal value(0, 1); xs append(a); ys append((a * 0.6) + normal value(0, 0.8)) }
+hb = ax hexbin(xs, ys, #{gridsize: 40, bins: "log", cmap: "inferno"})
+ax colorbar(hb, #{label: "count"})
+ax title("hexbin, log colours")
+
+// the same points as a 2-D histogram
+ax = axs at(2) at(0)
+[counts, xedges, yedges, h] = ax hist2d(xs, ys, 30, #{cmap: "Blues", cmin: 1})
+ax colorbar(h)
+ax title("hist2d")
+
+// a third value per point, averaged in each hexagon
+ax = axs at(2) at(1)
+hb2 = ax hexbin(xs, ys, #{gridsize: 25, C: (0..(xs size - 1)) map { |i| xs at(i) * ys at(i) },
+                          reduceC: "mean", cmap: "coolwarm", edgecolors: "white"})
+ax colorbar(hb2, #{label: "mean of x·y"})
+ax title("hexbin of C, averaged")
+
+out = "examples/out"
+(File isDir(out)) ifFalse { File mkdir(out) }
+fig savefig(out + "/dates_density.png")
+fig savefig(out + "/dates_density.svg")
+"wrote examples/out/dates_density.png and .svg" println

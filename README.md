@@ -63,6 +63,12 @@ fig savefig("subplots.svg")
 | `plt.violinplot([a, b], showmedians=True)` | `Plot violinplot([a, b], #{showmedians: true})` |
 | `cs = plt.contour(X, Y, Z, 10, colors="k")`, `plt.clabel(cs)` | `cs = Plot contour(X, Y, Z, 10, #{colors: "k"})`, `Plot clabel(cs)` |
 | `plt.contourf(X, Y, Z, cmap="RdBu")`, `plt.colorbar()` | `Plot contourf(X, Y, Z, #{cmap: "RdBu"})`, `Plot colorbar` |
+| `plt.axvspan(x0, x1, alpha=0.3)`, `plt.axhspan(y0, y1)` | `Plot axvspan(x0, x1, #{alpha: 0.3})`, `Plot axhspan(y0, y1)` |
+| `plt.hexbin(x, y, gridsize=40, bins="log")` | `Plot hexbin(x, y, #{gridsize: 40, bins: "log"})` |
+| `h, xe, ye, im = plt.hist2d(x, y, 30)` | `[h, xe, ye, im] = Plot hist2d(x, y, 30)` |
+| `plt.plot(pd.to_datetime(dates), y)` | `Plot plot(dates, y)`, with `Date`s or `"2024-03-15"` text |
+| `ani = FuncAnimation(fig, update, frames=60, interval=50)`, `ani.save("a.gif")` | `anim = Plot animate(fig, 60, { \|i\| ... }, #{interval: 50})`, `anim save("a.gif")` |
+| `ax.clear()`, `plt.cla()` | `ax clear`, `Plot cla` |
 | `plt.rcParams["font.size"] = 12` | `Plot rc set("font.size", 12)` |
 | `plt.savefig("f.png", dpi=150)`, `plt.show()`, `plt.close()` | `Plot savefig("f.png", #{dpi: 150})`, `Plot show`, `Plot close` |
 
@@ -89,6 +95,9 @@ return the artist they add, a Dict (`line get("color")`, `line set("label", "new
 | `step(xs, ys, fmt, opts)` | A step line. `where`: `"pre"` (the default), `"post"` or `"mid"`; and `plot`'s options. |
 | `errorbar(xs, ys, opts)` | Points or a line with error bars. `yerr`, `xerr`: a number, one per point, or `[lows, highs]`; `fmt` (`"o"`, `"s--"`; `"none"` for bars only), `capsize` (points), `ecolor`, `elinewidth`, and `plot`'s options. Returns `[line, bars]`. |
 | `axhline(y, opts)`, `axvline(x, opts)` | A line across the whole axes. `color`, `linestyle`, `linewidth`, `alpha`, `label`. |
+| `axhspan(y0, y1, opts)`, `axvspan(x0, x1, opts)` | A band across the whole axes, from `y0` to `y1` (or `x0` to `x1`). Two more numbers before the options limit it to fractions of the axes' width (height): `axhspan(y0, y1, 0.25, 0.75)`. `color` (`facecolor`), `alpha`, `edgecolor`, `linewidth`, `label`. |
+| `hexbin(xs, ys, opts)` | Points binned into hexagons, coloured by how many fall in each. `gridsize` (hexagons across, 100; or `[nx, ny]`), `bins: "log"` (colour by log10 count; the colour bar is ticked in powers of ten), `C` (a value per point, reduced per hexagon by `reduceC`: `"mean"`, `"sum"`, `"max"`, `"min"`, `"median"` or a block), `mincnt` (1: empty hexagons are left out), `cmap`, `vmin`, `vmax`, `alpha`, `edgecolors`, `extent`, `label`. |
+| `hist2d(xs, ys, bins, opts)` | A 2-D histogram. `bins`: a count (10), `[nx, ny]`, or `[xEdges, yEdges]`. `range: [[x0, x1], [y0, y1]]`, `density`, `cmin` / `cmax` (cells outside are left empty), `cmap`, `vmin`, `vmax`, `alpha`. Returns `[counts, xEdges, yEdges, artist]` as numpy does: `counts at(i) at(j)` is x bin `i`, y bin `j`. |
 | `text(x, y, s, opts)` | Text at data coordinates, or axes fractions with `transform: "axes"`. `fontsize`, `color`, `ha` (`"left"`, `"center"`, `"right"`), `va` (`"baseline"`, `"center"`, `"top"`, `"bottom"`), `rotation`, `fontweight`. |
 | `annotate(s, xy, xytext, opts)` | Text at `xytext` with an arrow to `xy` (`[x, y]` each; without `xytext` the text goes at `xy`). `xycoords` and `textcoords`: `"data"` (the default), `"axes fraction"`, `"figure fraction"`, or for the text `"offset points"` from `xy`. `arrowprops: #{arrowstyle:, color:, linewidth:, linestyle:, shrink:, shrinkA:, shrinkB:}` draws the arrow; `arrowstyle` is `"-|>"` (the default), `"->"`, `"-"`, `"<-"`, `"<->"`, `"<|-"` or `"<|-|>"`. `bbox: #{fc:, ec:, lw:, pad:, alpha:}` puts a box behind the text. Also `fontsize`, `color`, `ha`, `va`, `fontweight`. |
 | `imshow(data, opts)` | An image or heatmap: rows of numbers (through `cmap`, scaled to `vmin`..`vmax`; `nil` and `nan` cells are transparent) or rows of `[r, g, b]` or `[r, g, b, a]` pixels (0..1, or 0..255). A flat Array needs `shape: [rows, cols]` unless it is square: 784 numbers show as 28 x 28. An `Image` from [clay-image](https://github.com/mseminatore/clay-image) works too. Options: `cmap`, `vmin`, `vmax`, `aspect` (`"equal"` or `"auto"`), `origin` (`"upper"` or `"lower"`), `extent`. |
@@ -115,6 +124,7 @@ return the artist they add, a Dict (`line get("color")`, `line set("label", "new
 | `twinx`, `twiny` | A second axes over this one sharing its x axis, with its own y axis on the right (`twinx`); or sharing y, with an x axis along the top (`twiny`). Returns the new axes (`Plot twinx` also makes it current). The two share one colour cycle and one title, and a legend on either lists the labelled artists of both. |
 | `axis(mode)` | `"off"` hides the frame, ticks and labels; `"equal"` makes a unit the same length on both axes; `"auto"`; `"tight"`; or `[x0, x1, y0, y1]`. |
 | `invertYaxis` | Turn the y axis upside down |
+| `clear` | Remove everything drawn and set on the axes, to draw it afresh (`Plot cla` for the current axes) |
 | `xscale(kind)`, `yscale(kind)` | `"log"` or `"linear"`. Log axes are ticked at powers of ten (with minor ticks between) and leave out values at or below zero. `semilogy(...)`, `semilogx(...)` and `loglog(...)` are `plot` on log axes. |
 | `set(opts)` | Several at once: `title`, `xlabel`, `ylabel`, `xlim`, `ylim`, `xticks`, `yticks`, `xscale`, `yscale`, `aspect` |
 
@@ -207,6 +217,32 @@ ax legend                                                  // lists both axes' l
 
 ![Box plots, violins, contours and twin axes](docs/images/statistics.png)
 
+## Dates and densities
+
+Dates on the x axis, shaded spans, and many points as hexagons or a 2-D histogram, from
+[`examples/dates_density.clay`](examples/dates_density.clay):
+
+```clay norun
+ax plot(["2024-01-01", "2024-01-02", ...], visits)        // or Date objects
+ax axvspan("2024-03-29", "2024-04-01", #{color: "orange", alpha: 0.3, label: "Easter"})
+ax axhspan(105, 115, #{color: "green", alpha: 0.15})
+
+ax hexbin(xs, ys, #{gridsize: 40, bins: "log", cmap: "inferno"})
+[counts, xedges, yedges, h] = ax hist2d(xs, ys, 30, #{cmin: 1})
+```
+
+![Date axes, spans, hexbin and hist2d](docs/images/dates_density.png)
+
+Dates are `Date` objects or text, `"2024-03-15"`, `"2024-03-15 09:30"` or `"2024-03-15T09:30:15"`, in
+`plot`, `scatter`, `step`, `fillBetween`, `errorbar`, `stackplot`, `axvline`, `axvspan`, `text`,
+`annotate` and `xlim`, and as `Date` objects in `bar` (text in `bar` names categories, as in
+matplotlib). Ticks go on years, months, days, hours, minutes or seconds, whichever fit, and are
+labelled briefly, as matplotlib's `ConciseDateFormatter` does: a month's first day shows the
+month and a year's first month the year, with what the labels leave out (`2024-Feb`) under the
+end of the axis. Dates are taken as their clock time, as `Date` shows them, without time zones.
+On a date axis, `xlim` gives days since the first date plotted (Clay's 32-bit floats can't
+hold days since 1970 finer than a few minutes); `PlotDates` has the calendar sums.
+
 ## Machine learning
 
 Plots for training and evaluating models, in the style of scikit-learn's displays. They take
@@ -280,6 +316,41 @@ Plot xlabel("frame"); Plot ylabel("mel band")
 
 ![A spectrogram](docs/images/spectrogram.svg)
 
+## Animation
+
+Animated GIFs (and animated PNGs) of a figure as it changes, from
+[`examples/animation.clay`](examples/animation.clay):
+
+```clay norun
+// as matplotlib's FuncAnimation: update the figure for each frame
+anim = Plot animate(fig, 30, { |i| wave set("ys", xs map { |x| Math sin(x - (i / 5.0)) }) }, #{interval: 60})
+anim save("wave.gif")                     // or "wave.png": an animated PNG
+
+// or grab frames yourself, as matplotlib's writers do
+movie = Plot movie(#{fps: 6})
+steps each { |s| ax clear; draw(ax, s); movie grab(fig) }
+movie save("histogram.gif")
+
+// a training run replayed, an epoch a frame, on axes fixed to the final ranges
+live = Plot liveCurve
+net fit(x, y, #{"epochs": 30, "onEpoch": live})
+live animation save("training.gif")
+```
+
+![A learning curve replayed](docs/images/training.gif) ![A travelling wave](docs/images/wave.gif)
+
+| | |
+|---|---|
+| `Plot animate(fig, frames, update, opts)` | An animation. `frames` is a count (0 to n - 1), a Range or an Array; `update` is called with each before that frame is drawn, and may instead return a figure to draw. Options: `interval` (milliseconds a frame, 200) or `fps`, `dpi`, `loop` (0: for ever) or `repeat: false`, `colors` (a GIF's, up to 256). `anim save(path)` writes `.gif`, or `.png` / `.apng` for an animated PNG; `anim images` gives the frames as Images. |
+| `Plot movie(opts)` | A movie to add frames to: `movie grab(fig)` (the current figure if left out) after each change, then `movie save(path)`. Options as `animate`'s; `fps` is 10 by default. |
+| `live animation(opts)` | A `liveCurve`'s training replayed, on axes fixed to the final ranges. `every` (a frame every n epochs), and `animate`'s options (`interval` 100). |
+
+The frames are drawn as `savefig`'s PNGs are, and encoded by [clay-image](https://github.com/mseminatore/clay-image).
+A GIF has at most 256 colours, shared by all its frames: charts usually have fewer, and are kept
+exactly; otherwise the palette is learnt from the frames (NeuQuant), keeping the most used
+colours exact. Each frame stores only what changed, so the GIFs above are 47 KB and 96 KB.
+Animated PNGs are full colour but larger, and some viewers show only their first frame.
+
 ## In the terminal
 
 Any figure can be drawn as text: lines, markers and fills in Braille dots (2 x 4 to a
@@ -316,7 +387,7 @@ Plot show(#{terminal: true})        // or: Plot toText(#{cols: 64, rows: 16}) pr
 |---|---|
 | `toText(opts)` | The figure (`fig toText`, or `Plot toText` for the current one) as a String of lines. `cols` (the `COLUMNS` variable, or 80), `rows` (from the figure's shape, at most `LINES` - 1), `color` (`true` when writing to a terminal; `false` for plain text). |
 | `show(#{terminal: true})` | Print it rather than open a viewer. On Linux without a display (`DISPLAY` and `WAYLAND_DISPLAY` unset), `show` does this by itself. |
-| `Plot liveCurve(opts)` | A learning curve redrawn in place after every epoch: pass it as clay-ann `fit`'s `onEpoch`. Writing to a file or pipe instead, it prints a line per epoch. Options: `cols`, `rows` (20), `color`, `every` (redraw every n epochs), `title`, and `learningCurve`'s. `live savefig("loss.png")` saves the finished curve; `live history` has the epochs; `live value(loss)` adds one by hand. |
+| `Plot liveCurve(opts)` | A learning curve redrawn in place after every epoch: pass it as clay-ann `fit`'s `onEpoch`. Writing to a file or pipe instead, it prints a line per epoch. Options: `cols`, `rows` (20), `color`, `every` (redraw every n epochs), `title`, and `learningCurve`'s. `live savefig("loss.png")` saves the finished curve, `live animation save("training.gif")` replays it an epoch a frame (see Animation); `live history` has the epochs; `live value(loss)` adds one by hand. |
 
 ```clay
 live = Plot liveCurve
@@ -338,7 +409,7 @@ fonts do not).
   another sans-serif, which may sit a little closer or further than intended.
 - In SVG, images are embedded as base64 PNG, about a third larger than the PNG itself (a
   128 x 400 spectrogram is about 200 KB).
-- No date axes, symlog scales or 3-D yet. Log axes label only powers of ten (and 1, 2, 5 when less than two decades show).
+- Dates go on the x axis only. No symlog scales or 3-D yet. Log axes label only powers of ten (and 1, 2, 5 when less than two decades show).
 
 ## Install
 
@@ -359,6 +430,8 @@ clay examples/gallery.clay         # writes example figures to examples/out/
 clay examples/ml.clay
 clay examples/dashboard.clay
 clay examples/statistics.clay
+clay examples/dates_density.clay
+clay examples/animation.clay
 ```
 
 `examples/fashion_mnist.clay` also needs clay-ann; its header says how to run it.

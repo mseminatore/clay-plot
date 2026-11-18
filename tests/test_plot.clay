@@ -254,6 +254,183 @@ Test describe("Dashboard charts") {
     }
 }
 
+Test describe("Animation") {
+    tmp = File tempDir
+    Test it("animates a figure, frame by frame") {
+        Plot close
+        [fig, ax] = Plot subplots(#{figsize: [2, 1.5], dpi: 40})
+        line = ax plot([0, 1], [0, 0])
+        seen = []
+        anim = Plot animate(fig, 4, { |i| seen append(i); line set("ys", [0, i]) }, #{interval: 50})
+        Test assertEqual(anim toString, "PlotAnimation(4 frames)")
+        imgs = anim images
+        Test assertEqual(seen, [0, 1, 2, 3])
+        Test assertEqual([imgs size, imgs first width, imgs first height], [4, 80, 60])
+        Test assertTrue(imgs first pixels != imgs last pixels)
+        g = anim gifBytes
+        Test assertEqual(g slice(0, 6), "GIF89a")
+        Test assertTrue(g contains("NETSCAPE2.0"))
+        Test assertTrue(anim apngBytes contains("acTL"))
+        path = tmp + "/clay-plot-anim.gif"
+        Test assertEqual(anim save(path), path)
+        Test assertEqual((Image load(path)) width, 80)
+        File delete(path)
+        Test assertRaises({ anim save(tmp + "/x.svg") })
+        Test assertRaises({ Plot animate(fig, [], { |i| i }) })
+        // a Range of values, and an update that returns the figure to draw
+        other = Plot animate(nil, (1..2), { |k| PlotFigure new(#{figsize: [1, 1], dpi: 20}) })
+        Test assertEqual(other images first width, 20)
+        Plot close
+    }
+    Test it("records a movie of grabbed frames") {
+        Plot close
+        [fig, ax] = Plot subplots(#{figsize: [2, 1.5], dpi: 40})
+        movie = Plot movie(#{fps: 5})
+        Test assertRaises({ movie save(tmp + "/empty.gif") })
+        3 times { |k|
+            ax clear
+            ax bar([1, 2], [k, 3 - k])
+            ax title("frame " + k toString)
+            movie grab(fig)
+        }
+        Test assertEqual(movie toString, "PlotMovie(3 frames)")
+        path = tmp + "/clay-plot-movie.png"
+        Test assertEqual(movie save(path), path)
+        Test assertTrue(File read(path) contains("fdAT"))
+        File delete(path)
+        Plot close
+    }
+    Test it("replays a live training curve") {
+        live = Plot liveCurve(#{terminal: false, figsize: [2, 1.5]})
+        Test assertRaises({ live animation })
+        6 times { |e| live history append(#{epoch: e + 1, loss: 1.0 / (e + 1)}) }
+        a = live animation(#{every: 2, dpi: 30})
+        Test assertEqual(a frames, [2, 4, 6])
+        Test assertEqual(a images size, 3)
+        Test assertEqual(live history size, 6)              // put back after each frame
+    }
+    Test it("clears an axes for redrawing") {
+        Plot close
+        Plot plot([1, 2, 3], #{label: "a"})
+        Plot title("t")
+        Plot xlim(0, 5)
+        Plot legend
+        Plot cla
+        ax = Plot gca
+        Test assertEqual([ax artists size, ax titleText, ax xlimits, ax legendOpts], [0, nil, nil, nil])
+        Test assertEqual(Plot plot([1]) get("color"), PlotColor hex(PlotColor cycleColor(0)))   // the colours start again
+        Plot close
+    }
+}
+
+Test describe("Dates") {
+    Test it("counts days as the calendar does") {
+        Test assertEqual(PlotDates daysFromCivil(1970, 1, 1), 0)
+        Test assertEqual(PlotDates daysFromCivil(2000, 3, 1), 11017)
+        Test assertEqual(PlotDates daysFromCivil(1969, 12, 31), -1)
+        Test assertEqual(PlotDates civilFromDays(19782), [2024, 2, 29])
+        Test assertEqual(PlotDates civilFromDays(-1), [1969, 12, 31])
+        // every day of four years, there and back
+        d = PlotDates daysFromCivil(2023, 1, 1)
+        bad = (0..1460) filter { |i|
+            c = PlotDates civilFromDays(d + i)
+            PlotDates daysFromCivil(c at(0), c at(1), c at(2)) != (d + i)
+        }
+        Test assertEqual(bad size, 0)
+    }
+    Test it("reads Dates and ISO text") {
+        Test assertEqual(PlotDates parts(Date fromTimestamp(0)) at(0) <= 0, true)
+        Test assertEqual(PlotDates parts("2024-02-29"), [19782, 0])
+        Test assertEqual(PlotDates parts("2024-02-29T06:30"), [19782, 23400])
+        Test assertEqual(PlotDates parts("2024-02-29 06:30:15"), [19782, 23415])
+        Test assertEqual(PlotDates isDate("2024-2-29"), false)
+        Test assertEqual(PlotDates isDate(42), false)
+        Test assertRaises({ PlotDates parts("next tuesday") })
+    }
+    Test it("ticks dates at every scale, concisely") {
+        o = PlotDates daysFromCivil(2024, 1, 1)
+        t = PlotDates ticks(0, 365, o, 8)
+        Test assertEqual(t get("labels"), ["2024", "Mar", "May", "Jul", "Sep", "Nov"])
+        Test assertEqual(t get("offset"), "")                     // the year is in the labels
+        t = PlotDates ticks(10, 40, o, 8)
+        Test assertEqual(t get("labels"), ["15", "22", "29", "Feb", "8"])
+        Test assertEqual(t get("offset"), "2024-Feb")
+        t = PlotDates ticks(2, 3.5, o, 8)
+        Test assertEqual(t get("labels") slice(0, 3), ["Jan 3", "06:00", "12:00"])
+        Test assertEqual(PlotDates ticks(0, 365 * 30, o, 8) get("labels") first, "2025")
+        t = PlotDates ticks(1.5, 1.5 + (2 / 1440.0), o, 8)
+        Test assertEqual(t get("labels") first, "12:00:00")
+    }
+    Test it("puts dates on an axis") {
+        Plot close
+        Plot plot(["2024-01-01", "2024-01-15", "2024-02-01"], [1, 3, 2])
+        Plot axvline("2024-01-10")
+        [lo, hi] = Plot xlim
+        Test assertTrue((lo < 0) && (hi > 31))                   // days since the first date
+        svg = Plot toSvg
+        Test assertTrue(svg contains(">Feb</text>"))
+        Test assertTrue(svg contains(">2024-Feb</text>"))
+        Plot xlim("2024-01-05", "2024-01-20")
+        Test assertEqual(Plot xlim, [4, 19])
+        Plot close
+        // a twin shares its host's dates
+        [fig, ax] = Plot subplots
+        ax plot([Date fromTimestamp(1700000000), Date fromTimestamp(1700086400)], [1, 2])
+        t = ax twinx
+        t plot(["2023-11-15 14:13:20"], [5])
+        // the origin is the first date's day (2023-11-14), so 14:13 the next day is 1.593
+        Test assertEqual(Math round(t artists first get("xs") first * 1000), 1593)
+        Plot close
+        // strings in bars stay categories
+        Plot bar(["2024-01-01", "b"], [1, 2])
+        Test assertTrue(Plot toSvg contains(">2024-01-01</text>"))
+        Plot close
+    }
+}
+
+Test describe("Spans and 2-D histograms") {
+    Test it("shades bands across the axes") {
+        Plot close
+        Plot plot([0, 10], [0, 1])
+        v = Plot axvspan(2, 4, #{alpha: 0.3, label: "window"})
+        h = Plot axhspan(0.2, 0.4, 0.25, 0.75, #{color: "red"})
+        Test assertEqual([v get("orient"), h get("f0"), h get("f1")], ["v", 0.25, 0.75])
+        Plot legend
+        svg = Plot toSvg
+        Test assertTrue(svg contains(">window</text>"))
+        Test assertTrue(svg contains("fill=\"#ff0000\""))
+        Plot close
+    }
+    Test it("bins points into hexagons") {
+        Plot close
+        xs = (0..99) map { |i| (i % 10) toFloat }
+        ys = (0..99) map { |i| (i / 10) toFloat }
+        hb = Plot hexbin(xs, ys, #{gridsize: 5})
+        Test assertEqual(hb get("values") sum, 100)               // every point counted once
+        Test assertEqual(hb get("values") size, hb get("xs") size)
+        m = Plot hexbin(xs, ys, #{gridsize: 5, C: xs, reduceC: "max"})
+        Test assertTrue(m get("values") max <= 9)
+        lg = Plot hexbin([1, 1, 1, 2], [1, 1, 1, 2], #{gridsize: 2, bins: "log"})
+        Test assertEqual(Math round(lg get("values") max * 1000), 477)   // log10(3)
+        Plot colorbar(lg)
+        Test assertTrue(Plot toSvg contains("<polygon"))
+        Test assertRaises({ Plot hexbin([1], [1, 2]) })
+        Test assertRaises({ Plot hexbin([1, 2], [1, 2], #{C: [1, 2], reduceC: "mode"}) })
+        Plot close
+    }
+    Test it("counts points in a 2-D grid, as numpy does") {
+        Plot close
+        [counts, xe, ye, art] = Plot hist2d([0, 0, 1, 2, 2, 2], [0, 0, 0, 1, 2, 2], 2)
+        Test assertEqual(xe, [0, 1, 2])
+        Test assertEqual(counts, [[2, 0], [1, 3]])             // counts at(xbin) at(ybin)
+        [c2, xe2, ye2, a2] = Plot hist2d([0, 1, 2], [0, 1, 2], [[0, 1, 3], [0, 3]], #{cmin: 2})
+        Test assertEqual(c2, [[1], [2]])
+        Test assertEqual(a2 get("cells") first first != a2 get("cells") first first, true)   // under cmin: empty (nan)
+        Test assertEqual(Plot ylim, [0, 3])
+        Plot close
+    }
+}
+
 Test describe("Contours") {
     // a cone on a 5 x 5 grid: z is the distance from the centre
     cone = (0..4) map { |i| (0..4) map { |j| Math sqrt(((i - 2) * (i - 2)) + ((j - 2) * (j - 2))) } }

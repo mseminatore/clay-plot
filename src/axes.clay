@@ -32,6 +32,8 @@ PlotAxes = Object clone {
     host = nil              // twinx / twiny: the axes this one shares a box with
     twinKind = nil          // "x": shares host's x axis (own y on the right); "y": shares y
     twins = nil             // the twins made from this axes
+    xDates = false          // x holds dates: days since the day xOrigin
+    xOrigin = nil           // (days since 1970) of the first date plotted
     // worked out while drawing
     plotBox = nil           // [x, y, w, h] in pixels
     view = nil              // [x0, x1, y0, y1] in data units
@@ -81,7 +83,7 @@ PlotAxes = Object clone {
     // mapped through cmap.
     scatter(x, y, opts = nil) {
         opts = opts ?? #{}
-        xs = _seq(x)
+        xs = _dx(_seq(x))
         ys = _seq(y)
         (xs size != ys size) ifTrue { raise("Plot: scatter: x and y must be the same length (" + xs size toString + " and " + ys size toString + ")") }
         c = opts get("c") ?? opts get("color")
@@ -177,7 +179,7 @@ PlotAxes = Object clone {
     fillBetween(x, y1, y2 = nil, opts = nil) {
         (y2 type == "Dict") ifTrue { opts = y2; y2 = nil }
         opts = opts ?? #{}
-        xs = _seq(x)
+        xs = _dx(_seq(x))
         a = _seq(y1)
         b = (y2 == nil) ifTrue { 0 } ifFalse { y2 }
         bs = (b type == "Number") ifTrue { xs map { |v| b } } ifFalse { _seq(b) }
@@ -193,14 +195,14 @@ PlotAxes = Object clone {
     axhline(y = 0, opts = nil) { _refLine("hline", y, opts ?? #{}) }
 
     // A vertical line across the axes at x
-    axvline(x = 0, opts = nil) { _refLine("vline", x, opts ?? #{}) }
+    axvline(x = 0, opts = nil) { _refLine("vline", _dx1(x), opts ?? #{}) }
 
     // Text at data coordinates: text(x, y, "label", #{fontsize:, color:, ha:,
     // va:, rotation:, transform: "axes"}). With transform "axes", x and y are
     // fractions of the axes (0, 0 bottom left; 1, 1 top right).
     text(x, y, s, opts = nil) {
         opts = opts ?? #{}
-        art = #{kind: "text", x: x, y: y, text: s toString, fontsize: opts get("fontsize") ?? _rc("font.size"),
+        art = #{kind: "text", x: _dx1(x), y: y, text: s toString, fontsize: opts get("fontsize") ?? _rc("font.size"),
                 color: PlotColor hex(opts get("color") ?? "k"), ha: opts get("ha") ?? "left",
                 va: opts get("va") ?? "baseline", rotation: opts get("rotation") ?? 0,
                 transform: opts get("transform") ?? "data", weight: opts get("fontweight")}
@@ -226,6 +228,8 @@ PlotAxes = Object clone {
         (xytext type == "Dict") ifTrue { opts = xytext; xytext = nil }
         opts = opts ?? #{}
         xytext = xytext ?? opts get("xytext")
+        ((xy type == "Array") && (xy size == 2)) ifTrue { xy = [_dx1(xy at(0)), xy at(1)] }
+        ((xytext type == "Array") && (xytext size == 2)) ifTrue { xytext = [_dx1(xytext at(0)), xytext at(1)] }
         _pair(xy, "xy")
         xc = _coords(opts get("xycoords") ?? "data", false)
         tc = xc
@@ -328,7 +332,7 @@ PlotAxes = Object clone {
         }
         yerr = opts get("yerr") ?? yerr
         xerr = opts get("xerr")
-        xs = _seq(x)
+        xs = _dx(_seq(x))
         ys = _seq(y)
         fmt = opts get("fmt")
         o = _copy(opts)
@@ -424,7 +428,7 @@ PlotAxes = Object clone {
         series = items
         ((items size == 1) && (items first size > 0) && (items first first type == "Array")) ifTrue { series = items first }
         series = series map { |s| _seq(s) }
-        xs = _seq(x)
+        xs = _dx(_seq(x))
         series each { |s| (s size != xs size) ifTrue { raise("Plot: stackplot: every series needs one value per x (" + xs size toString + ")") } }
         labels = opts get("labels")
         colors = opts get("colors")
@@ -487,6 +491,186 @@ PlotAxes = Object clone {
             }
         }
         out
+    }
+
+    // A band across the axes from ymin to ymax (data units), as matplotlib's
+    // axhspan: axhspan(ymin, ymax), axhspan(ymin, ymax, xmin, xmax) with
+    // xmin and xmax fractions of the axes' width (0 and 1), and an options
+    // Dict last: color (or facecolor), alpha, edgecolor, linewidth, label.
+    axhspan(ymin, ymax, a = nil, b = nil, c = nil) { _span("h", ymin, ymax, [a, b, c]) }
+
+    // A band from xmin to xmax (dates work too), across ymin..ymax of the
+    // axes' height: axvspan(xmin, xmax, ymin, ymax, opts)
+    axvspan(xmin, xmax, a = nil, b = nil, c = nil) { _span("v", _dx1(xmin), _dx1(xmax), [a, b, c]) }
+
+    _span(orient, lo, hi, args) {
+        opts = #{}
+        f = []
+        args each { |v| (v type == "Dict") ifTrue { opts = v } ifFalse { (v != nil) ifTrue { f append(v) } } }
+        art = #{kind: "span", orient: orient, lo: lo, hi: hi, f0: f at(0) ?? 0, f1: f at(1) ?? 1,
+                color: PlotColor hex(opts get("color") ?? opts get("facecolor") ?? opts get("fc") ?? "C0"),
+                alpha: opts get("alpha"), edgecolor: _hexOrNil(opts get("edgecolor") ?? opts get("ec")),
+                linewidth: opts get("linewidth") ?? opts get("lw"), label: opts get("label")}
+        artists append(art)
+        art
+    }
+
+    // Points binned into hexagons, coloured by how many fall in each (or by
+    // C values reduced per hexagon): hexbin(xs, ys, #{gridsize: 100 (across;
+    // or [nx, ny]), C:, reduceC: "mean" ("sum", "max", "min", "median" or a
+    // block given a hexagon's values), mincnt: 1, bins: "log" (colour by
+    // log10), cmap, vmin, vmax, alpha, edgecolors, extent: [x0, x1, y0, y1],
+    // label}). Empty hexagons are left out. Returns the artist (its centres
+    // and values), for colorbar.
+    hexbin(x, y, opts = nil) {
+        opts = opts ?? #{}
+        xs0 = _seq(x)
+        ys0 = _seq(y)
+        (xs0 size != ys0 size) ifTrue { raise("Plot: hexbin: x and y must be the same length (" + xs0 size toString + " and " + ys0 size toString + ")") }
+        cs0 = _seq(opts get("C"))
+        ((cs0 != nil) && (cs0 size != xs0 size)) ifTrue { raise("Plot: hexbin: C needs one value per point") }
+        keep = (0..(xs0 size - 1)) filter { |i| _ok(xs0 at(i)) && _ok(ys0 at(i)) && ((cs0 == nil) || _ok(cs0 at(i))) }
+        (keep size == 0) ifTrue { raise("Plot: hexbin needs points") }
+        xs = keep map { |i| xs0 at(i) }
+        ys = keep map { |i| ys0 at(i) }
+        ext = opts get("extent") ?? [xs min, xs max, ys min, ys max]
+        x0 = ext at(0) toFloat
+        x1 = ext at(1) toFloat
+        y0 = ext at(2) toFloat
+        y1 = ext at(3) toFloat
+        (x1 == x0) ifTrue { x0 = x0 - 0.5; x1 = x1 + 0.5 }
+        (y1 == y0) ifTrue { y0 = y0 - 0.5; y1 = y1 + 0.5 }
+        g = opts get("gridsize") ?? 100
+        nx = (g type == "Array") ifTrue { g at(0) } ifFalse { g }
+        ny = (g type == "Array") ifTrue { g at(1) } ifFalse { Math max(1, (nx / Math sqrt(3)) toInt) }
+        sx = (x1 - x0) / nx
+        sy = (y1 - y0) / ny
+        // two offset lattices, as matplotlib's: each point goes to the nearer centre
+        cells = Dict clone
+        order = []
+        xs size times { |k|
+            u = (xs at(k) - x0) / sx
+            v = (ys at(k) - y0) / sy
+            i1 = Math round(u)
+            j1 = Math round(v)
+            i2 = Math floor(u)
+            j2 = Math floor(v)
+            d1 = ((u - i1) * (u - i1)) + (3 * ((v - j1) * (v - j1)))
+            d2 = ((u - i2 - 0.5) * (u - i2 - 0.5)) + (3 * ((v - j2 - 0.5) * (v - j2 - 0.5)))
+            key = (d1 < d2) ifTrue { "a" + i1 toString + "," + j1 toString } ifFalse { "b" + i2 toString + "," + j2 toString }
+            c = cells get(key)
+            (c == nil) ifTrue {
+                cx = (d1 < d2) ifTrue { x0 + (i1 * sx) } ifFalse { x0 + ((i2 + 0.5) * sx) }
+                cy = (d1 < d2) ifTrue { y0 + (j1 * sy) } ifFalse { y0 + ((j2 + 0.5) * sy) }
+                c = [cx, cy, []]
+                cells set(key, c)
+                order append(key)
+            }
+            c at(2) append((cs0 == nil) ifTrue { 1 } ifFalse { cs0 at(keep at(k)) })
+        }
+        mincnt = opts get("mincnt") ?? 1
+        reduce = opts get("reduceC") ?? "mean"
+        log = opts get("bins") == "log"
+        cxs = []
+        cys = []
+        vals = []
+        order each { |key|
+            c = cells get(key)
+            items = c at(2)
+            (items size >= mincnt) ifTrue {
+                v = (cs0 == nil) ifTrue { items size } ifFalse { _reduce(items, reduce) }
+                log ifTrue { v = PlotTicks log10(v) }
+                (v != nil) ifTrue { cxs append(c at(0)); cys append(c at(1)); vals append(v) }
+            }
+        }
+        lim = #{}
+        (opts get("vmin") != nil) ifTrue { lim set("vmin", log ifTrue { PlotTicks log10(opts get("vmin")) } ifFalse { opts get("vmin") }) }
+        (opts get("vmax") != nil) ifTrue { lim set("vmax", log ifTrue { PlotTicks log10(opts get("vmax")) } ifFalse { opts get("vmax") }) }
+        art = #{kind: "hexbin", xs: cxs, ys: cys, values: vals, sx: sx, sy: sy, log: log, extent: [x0, x1, y0, y1],
+                cmap: opts get("cmap") ?? _rc("image.cmap"), alpha: opts get("alpha"),
+                edgecolor: _hexOrNil(opts get("edgecolors") ?? opts get("edgecolor")), label: opts get("label")}
+        _setRange(art, vals, lim)
+        artists append(art)
+        art
+    }
+
+    // A hexagon's values reduced to one number
+    _reduce(items, how) {
+        (how type == "Block") ifTrue { return how value(items) }
+        (how == "mean") ifTrue { return items sum / items size toFloat }
+        (how == "sum") ifTrue { return items sum }
+        (how == "max") ifTrue { return items max }
+        (how == "min") ifTrue { return items min }
+        (how == "median") ifTrue { return PlotStats quantile(items sort, 0.5) }
+        raise("Plot: hexbin: reduceC must be \"mean\", \"sum\", \"max\", \"min\", \"median\" or a block")
+    }
+
+    // A 2-D histogram: hist2d(xs, ys, bins, opts) or hist2d(xs, ys, opts).
+    // bins: a count for both (10), [nx, ny], or [xEdges, yEdges]. Options:
+    // bins, range: [[x0, x1], [y0, y1]], density, cmin / cmax (cells with
+    // fewer / more counts are left empty), cmap, vmin, vmax, alpha. Returns
+    // [counts, xEdges, yEdges, artist] as numpy's: counts at(i) at(j) is x
+    // bin i, y bin j.
+    hist2d(x, y, bins = nil, opts = nil) {
+        (bins type == "Dict") ifTrue { opts = bins; bins = nil }
+        opts = opts ?? #{}
+        bins = bins ?? opts get("bins") ?? 10
+        xs0 = _seq(x)
+        ys0 = _seq(y)
+        (xs0 size != ys0 size) ifTrue { raise("Plot: hist2d: x and y must be the same length (" + xs0 size toString + " and " + ys0 size toString + ")") }
+        keep = (0..(xs0 size - 1)) filter { |i| _ok(xs0 at(i)) && _ok(ys0 at(i)) }
+        xs = keep map { |i| xs0 at(i) }
+        ys = keep map { |i| ys0 at(i) }
+        rng = opts get("range")
+        bx = ((bins type == "Array") && (bins size == 2)) ifTrue { bins at(0) } ifFalse { bins }
+        by = ((bins type == "Array") && (bins size == 2)) ifTrue { bins at(1) } ifFalse { bins }
+        xe = _edges(xs, bx, (rng == nil) ifTrue { nil } ifFalse { rng at(0) })
+        ye = _edges(ys, by, (rng == nil) ifTrue { nil } ifFalse { rng at(1) })
+        nx = xe size - 1
+        ny = ye size - 1
+        counts = (1..nx) map { |i| (1..ny) map { |j| 0 } }
+        xs size times { |k|
+            u = xs at(k)
+            v = ys at(k)
+            ((u >= xe first) && (u <= xe last) && (v >= ye first) && (v <= ye last)) ifTrue {
+                row = counts at(_bin(xe, u))
+                j = _bin(ye, v)
+                row setAt(j, row at(j) + 1)
+            }
+        }
+        (opts get("density") == true) ifTrue {
+            total = (counts map { |r| r sum }) sum
+            (total > 0) ifTrue {
+                counts = (0..(nx - 1)) map { |i| (0..(ny - 1)) map { |j|
+                    counts at(i) at(j) / (total * (xe at(i + 1) - xe at(i)) * (ye at(j + 1) - ye at(j))) toFloat
+                } }
+            }
+        }
+        cmin = opts get("cmin")
+        cmax = opts get("cmax")
+        nan = 0.0 / 0.0
+        shown = (0..(ny - 1)) map { |j| (0..(nx - 1)) map { |i|
+            c = counts at(i) at(j)
+            (((cmin != nil) && (c < cmin)) || ((cmax != nil) && (c > cmax))) ifTrue { nan } ifFalse { c }
+        } }
+        art = #{kind: "mesh", xedges: xe, yedges: ye, cells: shown, cmap: opts get("cmap") ?? _rc("image.cmap"),
+                alpha: opts get("alpha"), label: opts get("label")}
+        flat = (shown flatten) filter { |v| _ok(v) }
+        _setRange(art, flat, opts)
+        art set("values", flat)
+        artists append(art)
+        [counts, xe, ye, art]
+    }
+
+    // Bin edges: given edges as they are, or a count of equal bins over
+    // range [lo, hi] (the data's, when not given)
+    _edges(values, bins, rng) {
+        (bins type == "Array") ifTrue { return bins }
+        lo = (rng != nil) ifTrue { rng at(0) } ifFalse { (values size > 0) ifTrue { values min } ifFalse { 0 } }
+        hi = (rng != nil) ifTrue { rng at(1) } ifFalse { (values size > 0) ifTrue { values max } ifFalse { 1 } }
+        (hi == lo) ifTrue { lo = lo - 0.5; hi = hi + 0.5 }
+        lo = lo toFloat
+        (0..bins) map { |i| lo + (((hi - lo) * i) / bins) }
     }
 
     // Box plots: boxplot(values), boxplot([set1, set2, ...]) or
@@ -743,7 +927,7 @@ PlotAxes = Object clone {
         (twinKind == "x") ifTrue { return host xlim(lo, hi) }
         ((lo == nil) && (hi == nil)) ifTrue { v = _view; return [_untx(v at(0), xLog), _untx(v at(1), xLog)] }
         (lo type == "Array") ifTrue { hi = lo at(1); lo = lo at(0) }
-        self xlimits = [lo, hi]
+        self xlimits = [_dx1(lo), _dx1(hi)]
         self
     }
 
@@ -798,6 +982,34 @@ PlotAxes = Object clone {
         (mode == "auto") ifTrue { self aspect = nil; return self }
         (mode == "tight") ifTrue { xlim(xlim); ylim(ylim); return self }
         raise("Plot: axis takes \"off\", \"on\", \"equal\", \"auto\", \"tight\" or [x0, x1, y0, y1]")
+    }
+
+    // Remove everything drawn and set on the axes (matplotlib's ax.clear,
+    // pyplot's cla): to redraw it afresh, as each frame of a movie
+    clear() {
+        self artists = []
+        self nextColor = 0
+        self titleText = nil
+        self titleOpts = nil
+        self xlabelText = nil
+        self ylabelText = nil
+        self xlimits = nil
+        self ylimits = nil
+        self xtickSpec = nil
+        self ytickSpec = nil
+        self legendOpts = nil
+        self colorbarArtist = nil
+        self colorbarLabel = nil
+        self aspect = nil
+        self yInverted = false
+        self axisVisible = true
+        self integerX = false
+        self integerY = false
+        self xLog = false
+        self yLog = false
+        self xDates = false
+        self xOrigin = nil
+        self
     }
 
     invertYaxis() {
@@ -866,7 +1078,7 @@ PlotAxes = Object clone {
             left = tl + pad + ywid
             (ylabelText != nil) ifTrue { left = left + (_pt(_rc("axes.labelsize")) * 1.2) + _pt(4) }
             bottom = tl + pad + _xLabelHeight(cv, fs)
-            (xlabelText != nil) ifTrue { bottom = bottom + (_pt(_rc("axes.labelsize")) * 1.25) + _pt(4) }
+            ((xlabelText != nil) || ((xt get("offset") ?? "") != "")) ifTrue { bottom = bottom + (_pt(_rc("axes.labelsize")) * 1.25) + _pt(4) }
             labs = xt get("labels")
             ((labs size > 0) && (xt get("rotation") == 0)) ifTrue { right = _tickWidth(cv, labs last, fs) / 2 }
             (yt get("labels") size > 0) ifTrue { top = fs / 2 }
@@ -1016,12 +1228,16 @@ PlotAxes = Object clone {
         (k == "violin") ifTrue { return _drawViolins(cv, art) }
         (k == "contour") ifTrue { return _drawContour(cv, art) }
         (k == "contourf") ifTrue { return _drawContourf(cv, art) }
+        (k == "span") ifTrue { return _drawSpan(cv, art) }
+        (k == "hexbin") ifTrue { return _drawHexbin(cv, art) }
+        (k == "mesh") ifTrue { return _drawMesh(cv, art) }
         nil
     }
 
     _zorder(art) {
         k = art get("kind")
-        (k == "image" || k == "contourf") ifTrue { return 0 }
+        (k == "image" || k == "contourf" || k == "mesh") ifTrue { return 0 }
+        (k == "span") ifTrue { return 1 }
         (k == "bars" || k == "fill" || k == "wedge" || k == "violin") ifTrue { return 1 }
         (k == "text") ifTrue { return 3 }
         2
@@ -1324,6 +1540,83 @@ PlotAxes = Object clone {
                 art get("showmedians") ifTrue { _boxLine(cv, vert, pos - q, b get("median"), pos + q, b get("median"), lines) }
                 art get("showmeans") ifTrue { _boxLine(cv, vert, pos - q, b get("mean"), pos + q, b get("mean"), lines) }
                 b get("quantiles") each { |v| _boxLine(cv, vert, pos - q, v, pos + q, v, lines) }
+            }
+        }
+    }
+
+    _drawSpan(cv, art) {
+        b = plotBox
+        a = 0
+        c = 0
+        (art get("orient") == "v") ifTrue {
+            x0 = _px(art get("lo"))
+            x1 = _px(art get("hi"))
+            y0 = (b at(1) + b at(3)) - (art get("f1") * b at(3))
+            y1 = (b at(1) + b at(3)) - (art get("f0") * b at(3))
+            a = [Math min(x0, x1), y0, (x1 - x0) abs, y1 - y0]
+        } ifFalse {
+            y0 = _py(art get("lo"))
+            y1 = _py(art get("hi"))
+            x0 = b at(0) + (art get("f0") * b at(2))
+            x1 = b at(0) + (art get("f1") * b at(2))
+            a = [x0, Math min(y0, y1), x1 - x0, (y1 - y0) abs]
+        }
+        edge = art get("edgecolor")
+        cv rect(a at(0), a at(1), a at(2), a at(3), #{fill: art get("color"), alpha: art get("alpha"), stroke: edge,
+                                                      width: (edge != nil) ifTrue { _pt(art get("linewidth") ?? 1) } ifFalse { nil }})
+    }
+
+    // Hexagons, pointy side up, in a colour from their value. Opaque ones
+    // get a hairline of their own colour (no seams between neighbours).
+    _drawHexbin(cv, art) {
+        lut = PlotColor lut(art get("cmap"))
+        lo = art get("vmin")
+        span = (art get("vmax") - lo) toFloat
+        (span == 0) ifTrue { span = 1.0 }
+        hx = art get("sx") / 2
+        hy = art get("sy") / 6
+        dx = [hx, hx, 0, 0 - hx, 0 - hx, 0]
+        dy = [0 - hy, hy, hy * 2, hy, 0 - hy, 0 - (hy * 2)]
+        alpha = art get("alpha")
+        edge = art get("edgecolor")
+        art get("values") size times { |i|
+            v = art get("values") at(i)
+            c = lut at(Math round((((v - lo) / span) clamp(0, 1)) * 255))
+            cx = art get("xs") at(i)
+            cy = art get("ys") at(i)
+            px = dx map { |d| _px(cx + d) }
+            py = dy map { |d| _py(cy + d) }
+            style = (edge != nil) ifTrue { #{fill: c, alpha: alpha, stroke: edge, width: _pt(0.5)} } ifFalse {
+                ((alpha == nil) || (alpha >= 1)) ifTrue { #{fill: c, stroke: c, width: 1.0} } ifFalse { #{fill: c, alpha: alpha} }
+            }
+            cv polygon(px, py, style)
+        }
+    }
+
+    // Cells between x and y edges, in a colour from their value; nil and
+    // nan cells are left empty
+    _drawMesh(cv, art) {
+        lut = PlotColor lut(art get("cmap"))
+        lo = art get("vmin")
+        span = (art get("vmax") - lo) toFloat
+        (span == 0) ifTrue { span = 1.0 }
+        xe = art get("xedges")
+        ye = art get("yedges")
+        alpha = art get("alpha")
+        hair = (alpha == nil) || (alpha >= 1)
+        art get("cells") size times { |j|
+            row = art get("cells") at(j)
+            row size times { |i|
+                v = row at(i)
+                _ok(v) ifTrue {
+                    c = lut at(Math round((((v - lo) / span) clamp(0, 1)) * 255))
+                    x0 = _px(xe at(i))
+                    x1 = _px(xe at(i + 1))
+                    y0 = _py(ye at(j))
+                    y1 = _py(ye at(j + 1))
+                    style = hair ifTrue { #{fill: c, stroke: c, width: 1.0} } ifFalse { #{fill: c, alpha: alpha} }
+                    cv rect(Math min(x0, x1), Math min(y0, y1), (x1 - x0) abs, (y1 - y0) abs, style)
+                }
             }
         }
     }
@@ -1661,6 +1954,10 @@ PlotAxes = Object clone {
         (xlabelText != nil) ifTrue {
             cv text(bx + (bw / 2), by + bh + tl + pad + _xLabelHeight(cv, fs) + _pt(4), xlabelText, #{size: ls, anchor: "middle", valign: "top"})
         }
+        off = xt get("offset") ?? ""
+        (off != "") ifTrue {
+            cv text(bx + bw, by + bh + tl + pad + _xLabelHeight(cv, fs) + _pt(4), off, #{size: fs, anchor: "end", valign: "top"})
+        }
         (ylabelText != nil) ifTrue {
             ywid = yl reduce(0) { |m, s| Math max(m, _tickWidth(cv, s, fs)) }
             cv text(bx - tl - pad - ywid - _pt(4), by + (bh / 2), ylabelText, #{size: ls, anchor: "middle", valign: "bottom", rotate: 90})
@@ -1786,8 +2083,9 @@ PlotAxes = Object clone {
                 fill = (a get("colors") != nil) ifTrue { a get("colors") first } ifFalse { a get("color") }
                 cv rect(hx, y - (fs * 0.35), handle, fs * 0.7, #{fill: fill, alpha: a get("alpha")})
             }
-            (k == "contourf") ifTrue {
-                cv rect(hx, y - (fs * 0.35), handle, fs * 0.7, #{fill: a get("color"), alpha: a get("alpha")})
+            (k == "contourf" || k == "span") ifTrue {
+                cv rect(hx, y - (fs * 0.35), handle, fs * 0.7, #{fill: a get("color"), alpha: a get("alpha"),
+                                                                 stroke: a get("edgecolor"), width: _pt(1)})
             }
             (k == "bars" || k == "fill" || k == "wedge") ifTrue {
                 fill = (a get("colors") != nil) ifTrue { a get("colors") first } ifFalse { a get("color") }
@@ -1887,12 +2185,17 @@ PlotAxes = Object clone {
         a = colorbarArtist
         t = PlotTicks locate(a get("vmin"), a get("vmax"), Math max(2, Math min(9, (h / (fs * 2.5)) toInt)))
         self cbt = #{values: t get("values"), labels: PlotTicks labels(t get("values"), t get("decimals"))}
+        // a log hexbin's colour is log10 of the counts: ticks at powers of ten
+        (a get("log") == true) ifTrue {
+            t = PlotTicks locateLog(a get("vmin"), a get("vmax"), Math max(2, Math min(9, (h / (fs * 2.5)) toInt)))
+            self cbt = #{values: t get("values"), labels: t get("labels")}
+        }
         // a contour's colour bar is ticked at its levels, when they fit
         lv = a get("levels")
         ((lv != nil) && (lv size >= 2) && (lv size <= Math max(2, (h / (fs * 1.6)) toInt))) ifTrue {
             self cbt = #{values: lv, labels: lv map { |v| PlotTicks short(v) }}
         }
-        widest = cbt get("labels") reduce(0) { |m, s| Math max(m, cv measure(s, fs)) }
+        widest = cbt get("labels") reduce(0) { |m, s| Math max(m, _tickWidth(cv, s, fs)) }
         extra = (colorbarLabel != nil) ifTrue { (_pt(_rc("axes.labelsize")) * 1.2) + _pt(4) } ifFalse { 0 }
         _pt(14) + _pt(10) + _pt(3.5) + _pt(3.5) + widest + extra
     }
@@ -1929,10 +2232,10 @@ PlotAxes = Object clone {
         vals size times { |i|
             ty = (y + h) - (((vals at(i) - lo) / span) * h)
             cv line(x + w, ty, x + w + tl, ty, #{stroke: "#000000", width: lw})
-            cv text(x + w + tl + _pt(3.5), ty, labs at(i), #{size: fs, valign: "center"})
+            _tickText(cv, x + w + tl + _pt(3.5), ty, labs at(i), #{size: fs, anchor: "start", valign: "center"})
         }
         (colorbarLabel != nil) ifTrue {
-            widest = labs reduce(0) { |m, s| Math max(m, cv measure(s, fs)) }
+            widest = labs reduce(0) { |m, s| Math max(m, _tickWidth(cv, s, fs)) }
             cv text(x + w + tl + _pt(3.5) + widest + _pt(4), y + (h / 2), colorbarLabel,
                     #{size: _pt(_rc("axes.labelsize")), anchor: "middle", valign: "top", rotate: 90})
         }
@@ -2048,6 +2351,21 @@ PlotAxes = Object clone {
                     }
                 }
             }
+            (k == "span") ifTrue {
+                inc = (a get("orient") == "h") ifTrue { incY } ifFalse { incX }
+                inc value(a get("lo")); inc value(a get("hi"))
+            }
+            (k == "hexbin") ifTrue {
+                e = a get("extent")
+                incX value(e at(0)); incX value(e at(1))
+                incY value(e at(2) - (a get("sy") / 3)); incY value(e at(3) + (a get("sy") / 3))
+            }
+            (k == "mesh") ifTrue {
+                incX value(a get("xedges") first); incX value(a get("xedges") last)
+                incY value(a get("yedges") first); incY value(a get("yedges") last)
+                useX ifTrue { tight setAt(0, true) }
+                useY ifTrue { tight setAt(1, true) }
+            }
             (k == "contour" || k == "contourf") ifTrue {
                 e = a get("extent")
                 incX value(e at(0)); incX value(e at(1))
@@ -2127,8 +2445,48 @@ PlotAxes = Object clone {
 
     _computeTicks(cv, w, h) {
         v = view
-        self xt = _axisTicks(cv, xtickSpec, v at(0), v at(1), w, true, integerX, xLog)
+        da = _dateAxes
+        dates = da xDates && (xtickSpec == nil) && (twinKind != "y")
+        self xt = dates ifTrue { _dateTicks(cv, v at(0), v at(1), w, da xOrigin) } ifFalse {
+            _axisTicks(cv, xtickSpec, v at(0), v at(1), w, true, integerX, xLog)
+        }
         self yt = _axisTicks(cv, ytickSpec, v at(2), v at(3), h, false, integerY, yLog)
+    }
+
+    // Date ticks, as many as fit side by side: #{values:, labels:, rotation:, offset:}
+    _dateTicks(cv, lo, hi, length, origin) {
+        fs = _pt(_rc("xtick.labelsize"))
+        n = ((length / (fs * 4)) toInt) clamp(1, 9)
+        t = nil
+        tries = 0
+        { tries < 9 } whileTrue {
+            t = PlotDates ticks(lo, hi, origin, n)
+            widest = t get("labels") reduce(0) { |m, s| Math max(m, cv measure(s, fs)) }
+            (((widest + fs) * t get("labels") size) <= (length * 1.1) || (n <= 1)) ifTrue { break }
+            n = n - 1
+            tries = tries + 1
+        }
+        #{values: t get("values"), labels: t get("labels"), rotation: 0, offset: t get("offset")}
+    }
+
+    // The axes whose x axis the dates belong to (a twinx's host)
+    _dateAxes() { (twinKind == "x") ifTrue { host } ifFalse { self } }
+
+    // Values for the x axis: dates (Date objects, or text such as
+    // "2024-03-15") become days since the axes' first date; numbers stay
+    _dx(values) {
+        (values == nil) ifTrue { return nil }
+        ((values find { |v| (v type == "Date") || (v type == "String") }) == nil) ifTrue { return values }
+        values map { |v| _dx1(v) }
+    }
+
+    _dx1(v) {
+        ((v type != "Date") && (v type != "String")) ifTrue { return v }
+        da = _dateAxes
+        p = PlotDates parts(v)
+        (da xOrigin == nil) ifTrue { da xOrigin = p at(0) }
+        da xDates = true
+        (p at(0) - da xOrigin) + (p at(1) / 86400.0)
     }
 
     // Ticks in view units (lo and hi are too)
@@ -2216,6 +2574,7 @@ PlotAxes = Object clone {
     // ---- helpers --------------------------------------------------------
 
     _line(xs, ys, fmt, opts) {
+        xs = _dx(xs)
         (xs == nil) ifTrue { xs = (0..(ys size - 1)) toArray }
         (xs size != ys size) ifTrue { raise("Plot: plot: x and y must be the same length (" + xs size toString + " and " + ys size toString + ")") }
         f = _parseFmt(fmt)
@@ -2235,7 +2594,9 @@ PlotAxes = Object clone {
     }
 
     _bars(orient, x, length, opts) {
+        // Date objects place bars on a date axis; strings name categories
         xs = _seq(x)
+        ((orient == "v") && (xs size > 0) && (xs first type == "Date")) ifTrue { xs = _dx(xs) }
         lens = (length type == "Number") ifTrue { xs map { |v| length } } ifFalse { _seq(length) }
         (xs size != lens size) ifTrue { raise("Plot: bar: positions and lengths must be the same length (" + xs size toString + " and " + lens size toString + ")") }
         pos = xs

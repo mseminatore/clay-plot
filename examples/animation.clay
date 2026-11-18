@@ -1,0 +1,50 @@
+// Animations: a figure changed frame by frame (as matplotlib's
+// FuncAnimation), a movie of grabbed frames, and a training curve replayed.
+// Writes examples/out/wave.gif and .png, histogram.gif and training.gif.
+// Run from the brick's directory: clay examples/animation.clay
+import("plot")
+
+out = "examples/out"
+(File isDir(out)) ifFalse { File mkdir(out) }
+
+// 1. A travelling wave: update the line's points for each frame
+[fig, ax] = Plot subplots(#{figsize: [5, 3], dpi: 80})
+xs = (0..100) map { |i| i / 10.0 }
+wave = ax plot(xs, xs map { |x| Math sin(x) }, #{lw: 2})
+dot = ax plot([0], [0], "o", #{color: "C3", ms: 8})
+ax ylim(-1.2, 1.2)
+ax title("A travelling wave")
+anim = Plot animate(fig, 30, { |i|
+    phase = i / 5.0
+    wave set("ys", xs map { |x| Math sin(x - phase) })
+    dot set("xs", [phase])
+}, #{interval: 60})
+anim save(out + "/wave.gif")
+anim save(out + "/wave.png")                 // an animated PNG: full colour, larger
+
+// 2. A histogram filling up, grabbed frame by frame into a movie
+seed = 5
+uniform = { seed = (seed * 48271) % 2147483647; seed / 2147483647.0 }
+normal = { Math sqrt(-2 * Math log(uniform value)) * Math cos(2 * Math pi * uniform value) }
+[fig2, ax2] = Plot subplots(#{figsize: [5, 3], dpi: 80})
+movie = Plot movie(#{fps: 6})
+samples = []
+15 times { |k|
+    40 times { samples append(normal value) }
+    ax2 clear
+    ax2 hist(samples, 24, #{range: [-4, 4]})
+    ax2 ylim(0, 100)
+    ax2 title("n = " + samples size toString)
+    movie grab(fig2)
+}
+movie save(out + "/histogram.gif")
+
+// 3. A learning curve, recorded as training ran (here, made up), replayed
+live = Plot liveCurve(#{terminal: false, figsize: [5, 3]})
+30 times { |e|
+    live value(#{epoch: e + 1, loss: (1.5 / (e + 1)) + 0.1 + (0.02 * uniform value),
+                 valLoss: (1.6 / (e + 1)) + 0.15 + (e * 0.003) + (0.02 * uniform value)})
+}
+live animation(#{dpi: 80}) save(out + "/training.gif")
+
+"wrote examples/out/wave.gif, wave.png, histogram.gif and training.gif" println

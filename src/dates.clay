@@ -1,0 +1,208 @@
+// PlotDates -- dates on an axis: reading them, and where their ticks go
+//
+//   PlotDates parts(Date now)            // [days since 1970-01-01, seconds into the day]
+//   PlotDates parts("2024-03-15 09:30")  // ISO text works too ("T" or a space before the time)
+//   PlotDates ticks(0, 90, PlotDates daysFromCivil(2024, 1, 1), 8)
+//       // #{values: [...], labels: ["Jan", "Feb", ...], offset: "2024"}
+//
+// An axis of dates is in days since an origin day (the first date the axes
+// saw), not since 1970: Clay's floats are 32-bit, and 20,000 days since 1970
+// would leave them a precision of minutes. Dates are their clock time, as
+// Date shows it, with no time zone arithmetic. Calendar sums are integer and
+// proleptic Gregorian (Howard Hinnant's days_from_civil and civil_from_days).
+
+PlotDates = Object clone {
+    monthNames = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"]
+
+    // Is v a date: a Date, or text "YYYY-MM-DD", optionally with a time
+    isDate(v) { (v type == "Date") || ((v type == "String") && (_parse(v) != nil)) }
+
+    // [day, seconds]: days since 1970-01-01 and seconds into that day
+    parts(v) {
+        (v type == "Date") ifTrue {
+            return [daysFromCivil(v year, v month, v day), (v hour * 3600) + (v minute * 60) + v second]
+        }
+        (v type == "String") ifTrue {
+            p = _parse(v)
+            (p != nil) ifTrue { return p }
+        }
+        raise("Plot: not a date: " + v toString + " (use a Date, or text such as \"2024-03-15\" or \"2024-03-15 09:30\")")
+    }
+
+    // "YYYY-MM-DD", then optionally "THH:MM" or " HH:MM", then ":SS"
+    _parse(s) {
+        n = s length
+        ((n < 10) || (s at(4) != "-") || (s at(7) != "-")) ifTrue { return nil }
+        y = _digits(s, 0, 4)
+        m = _digits(s, 5, 7)
+        d = _digits(s, 8, 10)
+        ((y == nil) || (m == nil) || (d == nil) || (m < 1) || (m > 12) || (d < 1) || (d > 31)) ifTrue { return nil }
+        secs = 0
+        (n > 10) ifTrue {
+            sep = s at(10)
+            (((sep != "T") && (sep != " ")) || (n < 16) || (s at(13) != ":")) ifTrue { return nil }
+            hh = _digits(s, 11, 13)
+            mm = _digits(s, 14, 16)
+            ((hh == nil) || (mm == nil)) ifTrue { return nil }
+            secs = (hh * 3600) + (mm * 60)
+            (n >= 19) ifTrue {
+                (s at(16) != ":") ifTrue { return nil }
+                ss = _digits(s, 17, 19)
+                (ss == nil) ifTrue { return nil }
+                secs = secs + ss
+            }
+        }
+        [daysFromCivil(y, m, d), secs]
+    }
+
+    // The number in s from a up to b, if those are all digits
+    _digits(s, a, b) {
+        v = 0
+        i = a
+        { i < b } whileTrue {
+            c = s at(i)
+            ("0123456789" contains(c)) ifFalse { return nil }
+            v = (v * 10) + c toInt
+            i = i + 1
+        }
+        v
+    }
+
+    // a / b rounded down (Clay's / rounds towards zero)
+    _fdiv(a, b) {
+        q = a / b
+        (((a % b) != 0) && ((a < 0) != (b < 0))) ifTrue { q - 1 } ifFalse { q }
+    }
+
+    // Days since 1970-01-01 of a calendar date
+    daysFromCivil(y, m, d) {
+        y = (m <= 2) ifTrue { y - 1 } ifFalse { y }
+        era = _fdiv(y, 400)
+        yoe = y - (era * 400)
+        mp = (m + 9) % 12
+        doy = (((153 * mp) + 2) / 5) + d - 1
+        doe = (yoe * 365) + (yoe / 4) - (yoe / 100) + doy
+        (era * 146097) + doe - 719468
+    }
+
+    // [year, month, day] of a day number (days since 1970-01-01)
+    civilFromDays(z) {
+        z = z + 719468
+        era = _fdiv(z, 146097)
+        doe = z - (era * 146097)
+        yoe = (doe - (doe / 1460) + (doe / 36524) - (doe / 146096)) / 365
+        y = yoe + (era * 400)
+        doy = doe - ((365 * yoe) + (yoe / 4) - (yoe / 100))
+        mp = ((5 * doy) + 2) / 153
+        d = doy - (((153 * mp) + 2) / 5) + 1
+        m = (mp < 10) ifTrue { mp + 3 } ifFalse { mp - 9 }
+        [(m <= 2) ifTrue { y + 1 } ifFalse { y }, m, d]
+    }
+
+    // The tick steps, smallest first: [unit, count, about how many days]
+    _steps() {
+        out = []
+        [1, 2, 5, 10, 15, 30] each { |k| out append(["second", k, k / 86400.0]) }
+        [1, 2, 5, 10, 15, 30] each { |k| out append(["minute", k, k / 1440.0]) }
+        [1, 2, 3, 4, 6, 12] each { |k| out append(["hour", k, k / 24.0]) }
+        [1, 2, 3, 7, 14] each { |k| out append(["day", k, k toFloat]) }
+        [1, 2, 3, 4, 6] each { |k| out append(["month", k, k * 30.44]) }
+        [1, 2, 5, 10, 20, 50, 100, 200, 500, 1000] each { |k| out append(["year", k, k * 365.25]) }
+        out
+    }
+
+    // Ticks for an axis showing lo..hi days after the origin day, at most
+    // about maxTicks: #{values:, labels:, offset:}. Labels are short, as
+    // matplotlib's ConciseDateFormatter: a month's first day is labelled with
+    // the month, a year's first month with the year; offset is the context
+    // they leave out ("2024", "2024-Mar", "2024-Mar-15"), shown at the end.
+    ticks(lo, hi, origin, maxTicks = 8) {
+        (hi < lo) ifTrue { t = lo; lo = hi; hi = t }
+        span = hi - lo
+        step = _steps find { |s| (span / s at(2)) <= maxTicks }
+        step = step ?? _steps last
+        unit = step at(0)
+        k = step at(1)
+        values = []
+        labels = []
+        add = { |v, label|
+            ((v >= lo - 0.000001) && (v <= hi + 0.000001)) ifTrue { values append(v); labels append(label) }
+        }
+        ((unit == "second") || (unit == "minute") || (unit == "hour")) ifTrue {
+            stepSecs = (unit == "second") ifTrue { k } ifFalse { (unit == "minute") ifTrue { k * 60 } ifFalse { k * 3600 } }
+            // whole multiples of the step (in seconds since the origin day began)
+            sec = Math ceil((lo * 86400) / stepSecs) * stepSecs
+            { sec <= (hi * 86400) } whileTrue {
+                day = _fdiv(sec, 86400)
+                s = sec - (day * 86400)
+                add value(sec / 86400.0, _clockLabel(origin + day, s, unit))
+                sec = sec + stepSecs
+            }
+        }
+        (unit == "day") ifTrue {
+            day = Math floor(lo)
+            { day <= hi } whileTrue {
+                c = civilFromDays(origin + day)
+                (((c at(2) - 1) % k) == 0) ifTrue { add value(day, _dayLabel(c)) }
+                day = day + 1
+            }
+        }
+        (unit == "month") ifTrue {
+            c = civilFromDays(origin + Math floor(lo))
+            y = c at(0)
+            m = c at(1)
+            done = false
+            { done not } whileTrue {
+                v = daysFromCivil(y, m, 1) - origin
+                (v > hi) ifTrue { done = true } ifFalse {
+                    (((m - 1) % k) == 0) ifTrue { add value(v, (m == 1) ifTrue { y toString } ifFalse { monthNames at(m - 1) }) }
+                    m = m + 1
+                    (m > 12) ifTrue { m = 1; y = y + 1 }
+                }
+            }
+        }
+        (unit == "year") ifTrue {
+            y = _fdiv(civilFromDays(origin + Math floor(lo)) at(0), k) * k
+            done = false
+            { done not } whileTrue {
+                v = daysFromCivil(y, 1, 1) - origin
+                (v > hi) ifTrue { done = true } ifFalse {
+                    add value(v, y toString)
+                    y = y + k
+                }
+            }
+        }
+        // months whose labels include a year (a January) need no "2024" at the end
+        offset = _offset(unit, origin + Math floor(hi))
+        ((unit == "month") && ((labels find { |s| s length == 4 }) != nil)) ifTrue { offset = "" }
+        #{values: values, labels: labels, offset: offset, unit: unit}
+    }
+
+    // "Mar" on a month's first day ("2024" on a year's), else the day's number
+    _dayLabel(c) {
+        (c at(2) == 1) ifTrue { return (c at(1) == 1) ifTrue { c at(0) toString } ifFalse { monthNames at(c at(1) - 1) } }
+        c at(2) toString
+    }
+
+    // "09:30" ("09:30:15" for seconds); midnight is labelled with the day
+    _clockLabel(day, s, unit) {
+        (s == 0) ifTrue {
+            c = civilFromDays(day)
+            return (c at(2) == 1) ifTrue { _dayLabel(c) } ifFalse { monthNames at(c at(1) - 1) + " " + c at(2) toString }
+        }
+        text = _two(s / 3600) + ":" + _two((s % 3600) / 60)
+        (unit == "second") ifTrue { text = text + ":" + _two(s % 60) }
+        text
+    }
+
+    _two(n) { n toString padLeft(2, "0") }
+
+    // What the labels leave out, from the date at the axis's end
+    _offset(unit, day) {
+        c = civilFromDays(day)
+        (unit == "year") ifTrue { return "" }
+        (unit == "month") ifTrue { return c at(0) toString }
+        (unit == "day") ifTrue { return c at(0) toString + "-" + monthNames at(c at(1) - 1) }
+        c at(0) toString + "-" + monthNames at(c at(1) - 1) + "-" + _two(c at(2))
+    }
+}

@@ -1,0 +1,134 @@
+// PlotAnimation and PlotMovie -- animated GIFs and PNGs of figures
+//
+//   [fig, ax] = Plot subplots
+//   line = ax plot([], [])
+//   anim = Plot animate(fig, 60, { |i|          // as matplotlib's FuncAnimation
+//       xs = (0..i) toArray
+//       line set("xs", xs); line set("ys", xs map { |x| Math sin(x / 5.0) })
+//   }, #{interval: 50})
+//   anim save("wave.gif")                       // or .png for an animated PNG
+//
+//   movie = Plot movie(#{fps: 10})              // or grab frames yourself
+//   epochs each { |e| train(e); redraw(fig); movie grab(fig) }
+//   movie save("training.gif")
+//
+// Frames are drawn with the PNG backend, so they look as savefig's PNGs do.
+// GIFs share one palette over all the frames (exact for most charts) and
+// store only what changed from frame to frame; animated PNGs are full colour.
+// The encoding is the image brick's (Image saveGif, Image saveApng).
+
+PlotAnimation = Object clone {
+    fig = nil
+    frames = nil
+    updates = nil           // [the update block], or []: kept in an Array, as
+                            // a block in a slot would act as a method of ours
+    opts = nil
+
+    // fig: the figure the frames show (or nil, when update returns a
+    // figure for each frame); frames: a count n (0 to n - 1), a Range or an
+    // Array of values to call update with; update: a block called with each
+    // in turn, before that frame is drawn. opts: interval (milliseconds a
+    // frame, 200) or fps, dpi, loop (0: for ever; or repeat: false, once),
+    // colors (a GIF's, up to 256)
+    init(fig, frames, update, o = nil) {
+        self fig = fig
+        self frames = (frames type == "Number") ifTrue { (0..(frames - 1)) toArray } ifFalse {
+            (frames type == "Range") ifTrue { frames toArray } ifFalse { frames }
+        }
+        ((self frames type != "Array") || (self frames size == 0)) ifTrue { raise("Plot: an animation needs frames: a count, a Range or an Array") }
+        self updates = (update == nil) ifTrue { [] } ifFalse { [update] }
+        self opts = o ?? #{}
+    }
+
+    // The frames as Images (o: dpi)
+    images(o = nil) {
+        o = _merge(o)
+        out = []
+        frames each { |f|
+            shown = fig
+            (updates size > 0) ifTrue {
+                r = updates first value(f)
+                (r type == "PlotFigure") ifTrue { shown = r }
+            }
+            (shown == nil) ifTrue { raise("Plot: an animation needs a figure, or an update that returns one") }
+            out append(shown toCanvas(o get("dpi")) toImage)
+        }
+        out
+    }
+
+    // Save as .gif, or .png / .apng (an animated PNG); returns the path.
+    // o: the animation's options, for this file
+    save(path, o = nil) {
+        dot = path lastIndexOf(".")
+        ext = ((dot == nil) || (dot < 0)) ifTrue { "" } ifFalse { path slice(dot + 1, path length) lower }
+        (ext == "gif") ifTrue { File write(path, gifBytes(o)); return path }
+        ((ext == "png") || (ext == "apng")) ifTrue { File write(path, apngBytes(o)); return path }
+        raise("Plot: an animation saves as .gif, .png or .apng, not \"" + path + "\"")
+    }
+
+    gifBytes(o = nil) {
+        o = _merge(o)
+        Image gifBytes(images(o), _imageOpts(o))
+    }
+
+    apngBytes(o = nil) {
+        o = _merge(o)
+        Image apngBytes(images(o), _imageOpts(o))
+    }
+
+    // the animation's options, overridden by o
+    _merge(o) {
+        out = Dict clone
+        opts each { |k, v| out set(k, v) }
+        (o != nil) ifTrue { o each { |k, v| out set(k, v) } }
+        out
+    }
+
+    _imageOpts(o) { PlotMovie _imageOpts(o, 200) }
+
+    toString() {
+        (self == PlotAnimation) ifTrue { return "PlotAnimation" }
+        "PlotAnimation(" + frames size toString + " frames)"
+    }
+}
+
+PlotMovie = Object clone {
+    frames = nil
+    opts = nil
+
+    // opts: fps (10) or interval (milliseconds a frame), dpi, loop, colors
+    init(o = nil) {
+        self frames = []
+        self opts = o ?? #{}
+    }
+
+    // Add the figure as it is now (the current one by default) as a frame
+    grab(fig = nil) {
+        f = fig ?? Plot gcf
+        frames append(f toCanvas(opts get("dpi")) toImage)
+        self
+    }
+
+    // Save as .gif, or .png / .apng; returns the path
+    save(path) {
+        (frames size == 0) ifTrue { raise("Plot: the movie has no frames yet: grab some first") }
+        dot = path lastIndexOf(".")
+        ext = ((dot == nil) || (dot < 0)) ifTrue { "" } ifFalse { path slice(dot + 1, path length) lower }
+        (ext == "gif") ifTrue { return Image saveGif(path, frames, _imageOpts(opts, 100)) }
+        ((ext == "png") || (ext == "apng")) ifTrue { return Image saveApng(path, frames, _imageOpts(opts, 100)) }
+        raise("Plot: a movie saves as .gif, .png or .apng, not \"" + path + "\"")
+    }
+
+    // Image's options from ours: delay from interval or fps (else
+    // defaultDelay milliseconds); loop from loop, or repeat: false (once)
+    _imageOpts(o, defaultDelay) {
+        delay = o get("interval") ?? ((o get("fps") != nil) ifTrue { 1000.0 / o get("fps") } ifFalse { defaultDelay })
+        loop = o get("loop") ?? ((o get("repeat") == false) ifTrue { 1 } ifFalse { 0 })
+        #{delay: delay, loop: loop, colors: o get("colors") ?? 256}
+    }
+
+    toString() {
+        (self == PlotMovie) ifTrue { return "PlotMovie" }
+        "PlotMovie(" + frames size toString + " frames)"
+    }
+}

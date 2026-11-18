@@ -3,6 +3,7 @@
 //   live = Plot liveCurve
 //   history = net fit(x, y, #{epochs: 30, validation: [vx, vy], onEpoch: live})
 //   live savefig("loss.png")             // the finished curve as a picture
+//   live animation save("training.gif")  // training replayed, an epoch a frame
 //
 // clay-ann's fit calls onEpoch with a Dict per epoch (epoch, loss, valLoss,
 // lr); live takes those, or a number (the loss), from anything else:
@@ -67,6 +68,41 @@ PlotLive = Object clone {
 
     // Save the learning curve as .png or .svg (savefig's options)
     savefig(path, o = nil) { figure savefig(path, o) }
+
+    // Training replayed as an animation, an epoch a frame, on axes fixed to
+    // the final ranges so the curves grow without the axes jumping:
+    // live animation save("training.gif"). o: Plot animate's options
+    // (interval 100 by default), and every (a frame every n epochs).
+    animation(o = nil) {
+        o = o ?? #{}
+        (history size == 0) ifTrue { raise("Plot: nothing to animate yet: the live curve has no epochs") }
+        ax = figure axes first
+        xl = ax xlim
+        yl = ax ylim
+        step = o get("every") ?? 1
+        ks = (1..history size) filter { |k| ((k % step) == 0) || (k == history size) }
+        ao = #{interval: 100}
+        o each { |k, v| (k != "every") ifTrue { ao set(k, v) } }
+        // (me, not self: Clay 0.3.6's VM gives a block the self of whoever runs it)
+        me = self
+        PlotAnimation new(nil, ks, { |k| me _figureUpTo(k, xl, yl) }, ao)
+    }
+
+    // The figure of the first k epochs, on the given ranges
+    _figureUpTo(k, xl, yl) {
+        all = history
+        f = nil
+        try {
+            self history = all slice(0, k)
+            f = figure
+        } finally {
+            self history = all
+        }
+        a = f axes first
+        a xlim(xl)
+        a ylim(yl)
+        f
+    }
 
     // "epoch 12  loss 0.3412  val 0.3611"
     _summary(entry) {
