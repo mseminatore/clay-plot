@@ -78,4 +78,22 @@ Plot imageGrid((0..29) map { |k| xTest row(k) }, #{cols: 10, predicted: guesses 
                actual: labels slice(0, 30), labels: names, title: "Guesses (actual class in brackets when wrong)"})
 Plot savefig("fashion_mnist_samples.png")
 
-"wrote fashion_mnist_history.png, _confusion.png, _roc.png, _samples.png" println
+// what the network sees: its outputs for 1000 test images in two dimensions
+// (PCA), and which parts of one image its guess rests on (occlusion: how
+// much the guess's probability drops when each 4 x 4 patch is blanked)
+[fig, axs] = Plot subplots(1, 2, #{figsize: [12, 5]})
+axs first embedding(probs slice(0, 1000), labels slice(0, 1000), #{classNames: names, s: 8})
+axs first legend(#{bboxToAnchor: [1.0, 1], loc: "upper left", fontsize: 8})
+axs first title("The network's outputs, by PCA")
+img = xTest row(3)
+guess = PlotML argmax(net predict(img))
+sure = net predict(img) at(guess)
+heat = (0..6) map { |by| (0..6) map { |bx|
+    blanked = (0..783) map { |i| ((((i / 28) / 4) == by) && (((i % 28) / 4) == bx)) ifTrue { 0 } ifFalse { img at(i) } }
+    sure - (net predict(blanked) at(guess))
+} }
+axs last overlay(img, heat, #{alpha: 0.55})
+axs last title("What the guess \"" + names at(guess) + "\" rests on (occlusion)")
+Plot savefig("fashion_mnist_embedding.png")
+
+"wrote fashion_mnist_history.png, _confusion.png, _roc.png, _samples.png, _embedding.png" println

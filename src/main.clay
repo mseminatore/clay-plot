@@ -15,7 +15,8 @@
 //
 // Plot keeps a current figure and axes, as pyplot does; the drawing methods
 // (plot, scatter, bar, hist, imshow ...) go to the current axes. Figures and
-// axes can also be used directly: PlotFigure, PlotAxes. Colours and
+// axes can also be used directly: PlotFigure, PlotAxes (PlotPolarAxes for
+// polar ones), with $...$ math in any text (PlotMath). Colours and
 // colormaps are in PlotColor, tick placement in PlotTicks (and for dates in
 // PlotDates), the statistics behind box and violin plots in PlotStats,
 // contour geometry in PlotContour, and the backends are PlotSvg, PlotPng
@@ -40,6 +41,7 @@ import("png.clay")
 import("pdf.clay")
 import("term.clay")
 import("axes.clay")
+import("polar.clay")
 import("figure.clay")
 import("ml.clay")
 import("live.clay")
@@ -105,10 +107,24 @@ Plot = Object clone {
     }
 
     // Make the subplot at index (1-based) of a rows x cols grid current,
-    // creating it if needed: Plot subplot(1, 2, 1)
-    subplot(rows, cols, index) {
-        self currentAxes = gcf addSubplot(rows, cols, index)
+    // creating it if needed: Plot subplot(1, 2, 1). opts: projection
+    // ("polar": angle and radius)
+    subplot(rows, cols, index, opts = nil) {
+        self currentAxes = gcf addSubplot(rows, cols, index, opts)
         currentAxes
+    }
+
+    // A plot on polar axes (made current, and made polar if they aren't):
+    // Plot polar(thetas, rs, "o-", opts), as pyplot's polar
+    polar(a = nil, b = nil, c = nil, d = nil) {
+        ax = currentAxes
+        ((ax == nil) || (ax hasMethod("_rmax") not)) ifTrue {
+            // a flat axes there is replaced (as pyplot's polar does)
+            (ax != nil) ifTrue { f = gcf; f axesList = f axesList filter { |x| x != ax } }
+            ax = gcf addSubplot(1, 1, 1, #{projection: "polar"})
+            self currentAxes = ax
+        }
+        ax plot(a, b, c, d)
     }
 
     // An axes spanning cells, as matplotlib's subplot2grid, made current:
@@ -155,6 +171,11 @@ Plot = Object clone {
     axvspan(xmin, xmax, a = nil, b = nil, c = nil) { gca axvspan(xmin, xmax, a, b, c) }
     hexbin(x, y, opts = nil) { gca hexbin(x, y, opts) }
     hist2d(x, y, bins = nil, opts = nil) { gca hist2d(x, y, bins, opts) }
+    fill(x, y, opts = nil) { gca fill(x, y, opts) }
+    fillBetweenx(y, x1, x2 = nil, opts = nil) { gca fillBetweenx(y, x1, x2, opts) }
+    pcolormesh(a = nil, b = nil, c = nil, d = nil) { gca pcolormesh(a, b, c, d) }
+    pcolor(a = nil, b = nil, c = nil, d = nil) { gca pcolor(a, b, c, d) }
+    quiver(a = nil, b = nil, c = nil, d = nil, e = nil, f = nil) { gca quiver(a, b, c, d, e, f) }
     hist(data, bins = nil, opts = nil) { gca hist(data, bins, opts) }
     fillBetween(x, y1, y2 = nil, opts = nil) { gca fillBetween(x, y1, y2, opts) }
     axhline(y = 0, opts = nil) { gca axhline(y, opts) }
@@ -203,6 +224,19 @@ Plot = Object clone {
 
     // A new figure of images in a grid; see PlotML imageGrid for the options
     imageGrid(images, opts = nil) { PlotML imageGrid(images, opts ?? #{}) }
+
+    // Principal components of rows of numbers: #{projected:, components:,
+    // explained:, mean:} (PlotML pca)
+    pca(rows, k = 2, opts = nil) { PlotML pca(rows, k, opts) }
+
+    // Rows (embeddings, activations) in 2-D by PCA, coloured by class
+    embedding(rows, labels = nil, opts = nil) { gca embedding(rows, labels, opts) }
+
+    // A new figure of one histogram per layer of weights (PlotML weightHistograms)
+    weightHistograms(layers, opts = nil) { PlotML weightHistograms(layers, opts ?? #{}) }
+
+    // A heatmap (saliency, activations) scaled and blended over an image
+    overlay(image, heat, opts = nil) { gca overlay(image, heat, opts) }
 
     // ---- labels and settings (on the current axes) ------------------------
 

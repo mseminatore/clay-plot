@@ -108,6 +108,7 @@ PlotAxes = Object clone {
                 art set("color", PlotColor hex(c ?? _nextCycle))
             }
         }
+        _adopt(art)
         artists append(art)
         art
     }
@@ -195,6 +196,177 @@ PlotAxes = Object clone {
         art
     }
 
+    // Filled polygons, as matplotlib's fill: fill(xs, ys, opts) with the
+    // points of one polygon (closed for you), or fill([xs1, xs2], [ys1,
+    // ys2]) for several. color, alpha, edgecolor, linewidth, label.
+    fill(x, y, opts = nil) {
+        opts = opts ?? #{}
+        xs = _seq(x)
+        ys = _seq(y)
+        several = (xs size > 0) && (xs first type == "Array")
+        polys = several ifTrue { (0..(xs size - 1)) map { |i| [_dx(_seq(xs at(i))), _seq(ys at(i))] } } ifFalse { [[_dx(xs), ys]] }
+        polys each { |pp| (pp at(0) size != pp at(1) size) ifTrue { raise("Plot: fill: x and y must be the same length") } }
+        _polygons(polys, opts)
+    }
+
+    // Shade between two curves of x over y (matplotlib's fill_betweenx):
+    // fillBetweenx(ys, x1, x2 = 0, opts)
+    fillBetweenx(y, x1, x2 = nil, opts = nil) {
+        (x2 type == "Dict") ifTrue { opts = x2; x2 = nil }
+        opts = opts ?? #{}
+        ys = _seq(y)
+        a = _dx(_seq(x1))
+        b = (x2 == nil) ifTrue { 0 } ifFalse { x2 }
+        bs = (b type == "Number") ifTrue { ys map { |v| b } } ifFalse { _dx(_seq(b)) }
+        ((a size != ys size) || (bs size != ys size)) ifTrue { raise("Plot: fillBetweenx: ys, x1 and x2 must be the same length") }
+        _polygons([[a + bs reverse, ys + ys reverse]], opts)
+    }
+
+    // A polygons artist: [[xs, ys], ...] in data units
+    _polygons(polys, opts) {
+        c = opts get("color") ?? opts get("facecolor") ?? opts get("fc")
+        art = #{kind: "polygon", polys: polys, color: PlotColor hex(c ?? _nextCycle), alpha: opts get("alpha"),
+                edgecolor: _hexOrNil(opts get("edgecolor") ?? opts get("ec")), linewidth: opts get("linewidth") ?? opts get("lw"),
+                label: opts get("label")}
+        _adopt(art)
+        artists append(art)
+        art
+    }
+
+    // A grid of coloured cells, as matplotlib's pcolormesh: pcolormesh(C)
+    // or pcolormesh(X, Y, C), C as rows (row 0 at the bottom). X and Y are
+    // the cells' edges, one more than C's columns and rows (or as many: then
+    // they are the centres), or mesh grids of the corners for cells that
+    // aren't rectangles. Options: cmap, vmin, vmax, alpha, edgecolors,
+    // linewidth. nil and nan cells are left empty. Returns the artist, for colorbar.
+    pcolormesh(a = nil, b = nil, c = nil, d = nil) {
+        items = [a, b, c, d] filter { |v| v != nil }
+        opts = #{}
+        ((items size > 0) && (items last type == "Dict")) ifTrue { opts = items last; items = items slice(0, items size - 1) }
+        ((items size != 1) && (items size != 3)) ifTrue { raise("Plot: pcolormesh takes C, or X, Y and C (then an options Dict)") }
+        rows = _grid(items last, opts get("shape"))
+        ny = rows size
+        nx = rows first size
+        nan = 0.0 / 0.0
+        cells = rows map { |r| r map { |v| _ok(v) ifTrue { v } ifFalse { nan } } }
+        X = (items size == 3) ifTrue { _seqOrRows(items at(0)) } ifFalse { (0..nx) toArray }
+        Y = (items size == 3) ifTrue { _seqOrRows(items at(1)) } ifFalse { (0..ny) toArray }
+        art = nil
+        ((X size > 0) && (X first type == "Array")) ifTrue {
+            // corners of each cell, as mesh grids (ny + 1) x (nx + 1)
+            ((X size != ny + 1) || (X first size != nx + 1) || (Y size != ny + 1)) ifTrue {
+                raise("Plot: pcolormesh: mesh grids X and Y need " + (ny + 1) toString + " rows of " + (nx + 1) toString + " corners for C's " + ny toString + " x " + nx toString)
+            }
+            art = #{kind: "quadmesh", xs: X, ys: Y, cells: cells}
+        } ifFalse {
+            art = #{kind: "mesh", xedges: _cellEdges(X, nx, "X"), yedges: _cellEdges(Y, ny, "Y"), cells: cells}
+        }
+        art set("cmap", opts get("cmap") ?? _rc("image.cmap"))
+        art set("alpha", opts get("alpha"))
+        art set("edgecolor", _hexOrNil(opts get("edgecolors") ?? opts get("edgecolor")))
+        art set("linewidth", opts get("linewidth") ?? opts get("lw"))
+        art set("label", opts get("label"))
+        flat = (cells flatten) filter { |v| _ok(v) }
+        _setRange(art, flat, opts)
+        art set("values", flat)
+        artists append(art)
+        art
+    }
+
+    // pcolor is pcolormesh here (matplotlib's is a slower way to the same picture)
+    pcolor(a = nil, b = nil, c = nil, d = nil) { pcolormesh(a, b, c, d) }
+
+    // Cell edges from n + 1 edges as they are, or n centres (halfway between them)
+    _cellEdges(v, n, name) {
+        e = _seq(v)
+        (e size == n + 1) ifTrue { return e }
+        (e size == n) ifTrue {
+            (n == 1) ifTrue { return [e first - 0.5, e first + 0.5] }
+            mids = (0..(n - 2)) map { |i| (e at(i) + e at(i + 1)) / 2.0 }
+            return [e first - (mids first - e first)] + mids + [e last + (e last - mids last)]
+        }
+        raise("Plot: pcolormesh: " + name + " needs " + (n + 1) toString + " edges (or " + n toString + " centres), not " + e size toString)
+    }
+
+    // Arrows of a vector field, as matplotlib's quiver: quiver(U, V),
+    // quiver(X, Y, U, V) or quiver(X, Y, U, V, C), then options. U and V are
+    // rows (with X and Y one value per column / row, mesh grids, or omitted)
+    // or flat lists (with X and Y the points). Arrows are drawn in data
+    // units: scale is the vector length per data unit (by default, the
+    // longest arrow about one grid step long). Options: scale, color, C (or
+    // c: numbers per arrow, through cmap), cmap, vmin, vmax, width (points,
+    // 1.5), headwidth / headlength (times width; 3, 5), pivot ("tail", "mid",
+    // "tip"), alpha, label.
+    quiver(a = nil, b = nil, c = nil, d = nil, e = nil, f = nil) {
+        items = [a, b, c, d, e, f] filter { |v| v != nil }
+        opts = #{}
+        ((items size > 0) && (items last type == "Dict")) ifTrue { opts = items last; items = items slice(0, items size - 1) }
+        n = items size
+        ((n != 2) && (n != 4) && (n != 5)) ifTrue { raise("Plot: quiver takes U, V or X, Y, U, V (or X, Y, U, V, C), then an options Dict") }
+        U = items at((n == 2) ifTrue { 0 } ifFalse { 2 })
+        V = items at((n == 2) ifTrue { 1 } ifFalse { 3 })
+        us = _flatField(U)
+        vs = _flatField(V)
+        (us size != vs size) ifTrue { raise("Plot: quiver: U and V must be the same shape") }
+        xs = nil
+        ys = nil
+        rowsOf = ((U type == "Array") && (U size > 0) && (U first type == "Array")) ifTrue { U size } ifFalse { nil }
+        colsOf = (rowsOf != nil) ifTrue { U first size } ifFalse { nil }
+        (n == 2) ifTrue {
+            (rowsOf != nil) ifTrue {
+                xs = (0..(us size - 1)) map { |i| i % colsOf }
+                ys = (0..(us size - 1)) map { |i| i / colsOf }
+            } ifFalse {
+                xs = (0..(us size - 1)) toArray
+                ys = xs map { |v| 0 }
+            }
+        } ifFalse {
+            X = _seqOrRows(items at(0))
+            Y = _seqOrRows(items at(1))
+            ((rowsOf != nil) && (X size == colsOf) && (X first type != "Array") && (Y size == rowsOf)) ifTrue {
+                xs = (0..(us size - 1)) map { |i| X at(i % colsOf) }
+                ys = (0..(us size - 1)) map { |i| Y at(i / colsOf) }
+            } ifFalse {
+                xs = _flatField(X)
+                ys = _flatField(Y)
+            }
+        }
+        ((xs size != us size) || (ys size != us size)) ifTrue { raise("Plot: quiver: X, Y, U and V must agree in size") }
+        values = (n == 5) ifTrue { _flatField(items at(4)) } ifFalse { opts get("C") ?? opts get("c") }
+        art = #{kind: "quiver", xs: xs, ys: ys, us: us, vs: vs, scale: opts get("scale"),
+                width: opts get("width") ?? 1.5, headwidth: opts get("headwidth") ?? 3, headlength: opts get("headlength") ?? 5,
+                pivot: opts get("pivot") ?? "tail", alpha: opts get("alpha"), label: opts get("label"),
+                cmap: opts get("cmap") ?? _rc("image.cmap")}
+        ((values type == "Array") && (values size == us size)) ifTrue {
+            art set("values", values)
+            _setRange(art, values, opts)
+            art set("color", PlotColor hex(opts get("color") ?? "k"))
+        } ifFalse {
+            art set("color", PlotColor hex(opts get("color") ?? values ?? "k"))
+        }
+        // by default the longest arrow is about one grid step long
+        (art get("scale") == nil) ifTrue {
+            spanX = (xs max - xs min) toFloat
+            spanY = (ys max - ys min) toFloat
+            area = Math max(spanX, 1.0e-9) * Math max(spanY, 1.0e-9)
+            step = (spanY == 0) ifTrue { spanX / Math max(xs size - 1, 1) } ifFalse {
+                (spanX == 0) ifTrue { spanY / Math max(ys size - 1, 1) } ifFalse { Math sqrt(area / xs size) }
+            }
+            (step <= 0) ifTrue { step = 1.0 }
+            longest = 0.0
+            us size times { |i| longest = Math max(longest, Math sqrt((us at(i) * us at(i)) + (vs at(i) * vs at(i)))) }
+            art set("scale", (longest > 0) ifTrue { longest / (step * 0.9) } ifFalse { 1.0 })
+        }
+        artists append(art)
+        art
+    }
+
+    // Numbers in a field: rows flattened, or a flat list as it is
+    _flatField(v) {
+        a = _seqOrRows(v)
+        ((a size > 0) && (a first type == "Array")) ifTrue { a flatten } ifFalse { _seq(a) }
+    }
+
     // A horizontal line across the axes at y: axhline(y, #{color:, linestyle:,
     // linewidth:, label:, alpha:})
     axhline(y = 0, opts = nil) { _refLine("hline", y, opts ?? #{}) }
@@ -211,6 +383,7 @@ PlotAxes = Object clone {
                 color: PlotColor hex(opts get("color") ?? "k"), ha: opts get("ha") ?? "left",
                 va: opts get("va") ?? "baseline", rotation: opts get("rotation") ?? 0,
                 transform: opts get("transform") ?? "data", weight: opts get("fontweight")}
+        _adopt(art)
         artists append(art)
         art
     }
@@ -265,6 +438,7 @@ PlotAxes = Object clone {
                               stroke: _hexOrNil(bb get("ec") ?? bb get("edgecolor") ?? "k"),
                               linewidth: bb get("lw") ?? bb get("linewidth") ?? 1, pad: bb get("pad"), alpha: bb get("alpha")})
         }
+        _adopt(art)
         artists append(art)
         art
     }
@@ -888,6 +1062,20 @@ PlotAxes = Object clone {
         PlotML decisionBoundary(self, model, inputs, labels, opts ?? #{})
     }
 
+    // Rows (embeddings, a layer's activations) in two dimensions by PCA, a
+    // colour per class (see PlotML embedding)
+    embedding(rows, labels = nil, opts = nil) {
+        (labels type == "Dict") ifTrue { opts = labels; labels = nil }
+        PlotML embedding(self, rows, labels, opts ?? #{})
+    }
+
+    // A heatmap scaled to an image and blended over it (see PlotML overlay)
+    overlay(image, heat, opts = nil) { PlotML overlay(self, image, heat, opts ?? #{}) }
+
+    // Every artist the drawing methods make passes through here before it
+    // joins the axes; polar axes turn (angle, radius) into x and y
+    _adopt(art) { art }
+
     // ---- twin axes ------------------------------------------------------
 
     // A second axes over this one, sharing its x axis, with its own y axis
@@ -1007,7 +1195,7 @@ PlotAxes = Object clone {
         self legendOpts = nil
         self colorbarArtist = nil
         self colorbarLabel = nil
-        self aspect = nil
+        self aspect = (self hasMethod("_rmax")) ifTrue { "equal" } ifFalse { nil }     // polar axes stay round
         self yInverted = false
         self axisVisible = true
         self integerX = false
@@ -1242,12 +1430,16 @@ PlotAxes = Object clone {
         (k == "span") ifTrue { return _drawSpan(cv, art) }
         (k == "hexbin") ifTrue { return _drawHexbin(cv, art) }
         (k == "mesh") ifTrue { return _drawMesh(cv, art) }
+        (k == "polygon") ifTrue { return _drawPolygons(cv, art) }
+        (k == "quadmesh") ifTrue { return _drawQuadmesh(cv, art) }
+        (k == "quiver") ifTrue { return _drawQuiver(cv, art) }
         nil
     }
 
     _zorder(art) {
         k = art get("kind")
-        (k == "image" || k == "contourf" || k == "mesh") ifTrue { return 0 }
+        (k == "image" || k == "contourf" || k == "mesh" || k == "quadmesh") ifTrue { return 0 }
+        (k == "polygon") ifTrue { return 1 }
         (k == "span") ifTrue { return 1 }
         (k == "bars" || k == "fill" || k == "wedge" || k == "violin") ifTrue { return 1 }
         (k == "text") ifTrue { return 3 }
@@ -1284,9 +1476,11 @@ PlotAxes = Object clone {
             ms = _pt(art get("markersize") ?? _rc("lines.markersize"))
             face = _hexOrNil(art get("markerfacecolor")) ?? color
             edge = _hexOrNil(art get("markeredgecolor")) ?? face
-            xs size times { |i|
-                x = xs at(i)
-                y = ys at(i)
+            mxs = art get("mxs") ?? xs
+            mys = art get("mys") ?? ys
+            mxs size times { |i|
+                x = mxs at(i)
+                y = mys at(i)
                 (_okX(x) && _okY(y)) ifTrue { _marker(cv, marker, _px(x), _py(y), ms, face, edge, alpha) }
             }
         }
@@ -1555,6 +1749,106 @@ PlotAxes = Object clone {
         }
     }
 
+    _drawPolygons(cv, art) {
+        edge = art get("edgecolor")
+        style = #{fill: art get("color"), alpha: art get("alpha"), stroke: edge,
+                  width: (edge != nil) ifTrue { _pt(art get("linewidth") ?? 1) } ifFalse { nil }, join: "round"}
+        colors = art get("colors")
+        k = -1
+        art get("polys") each { |pp|
+            k = k + 1
+            (colors != nil) ifTrue { style set("fill", colors at(k % colors size)) }
+            px = []
+            py = []
+            pp at(0) size times { |i|
+                x = pp at(0) at(i)
+                y = pp at(1) at(i)
+                (_okX(x) && _okY(y)) ifTrue { px append(_px(x)); py append(_py(y)) }
+            }
+            (px size >= 3) ifTrue { cv polygon(px, py, style) }
+        }
+    }
+
+    // A cell's colour from its value through the colormap, or nil (empty)
+    _cellColor(art, lut, v) {
+        _ok(v) ifFalse { return nil }
+        lo = art get("vmin")
+        span = (art get("vmax") - lo) toFloat
+        (span == 0) ifTrue { span = 1.0 }
+        lut at(Math round((((v - lo) / span) clamp(0, 1)) * 255))
+    }
+
+    // The fill style of a mesh's cells: a hairline of their own colour
+    // hides seams when opaque; an edgecolor draws a line round each instead
+    _cellStyle(art, c) {
+        edge = art get("edgecolor")
+        alpha = art get("alpha")
+        (edge != nil) ifTrue { return #{fill: c, alpha: alpha, stroke: edge, width: _pt(art get("linewidth") ?? 0.5)} }
+        ((alpha == nil) || (alpha >= 1)) ifTrue { #{fill: c, stroke: c, width: 1.0} } ifFalse { #{fill: c, alpha: alpha} }
+    }
+
+    // Cells with corners on mesh grids (quadrilaterals)
+    _drawQuadmesh(cv, art) {
+        lut = PlotColor lut(art get("cmap"))
+        X = art get("xs")
+        Y = art get("ys")
+        art get("cells") size times { |j|
+            row = art get("cells") at(j)
+            row size times { |i|
+                c = _cellColor(art, lut, row at(i))
+                (c != nil) ifTrue {
+                    cx = [X at(j) at(i), X at(j) at(i + 1), X at(j + 1) at(i + 1), X at(j + 1) at(i)]
+                    cy = [Y at(j) at(i), Y at(j) at(i + 1), Y at(j + 1) at(i + 1), Y at(j + 1) at(i)]
+                    cv polygon(cx map { |v| _px(v) }, cy map { |v| _py(v) }, _cellStyle(art, c))
+                }
+            }
+        }
+    }
+
+    // Arrows, drawn in pixels along their data direction: a shaft and a
+    // filled head, both sized by width (in points)
+    _drawQuiver(cv, art) {
+        values = art get("values")
+        lut = (values != nil) ifTrue { PlotColor lut(art get("cmap")) } ifFalse { nil }
+        sc = art get("scale")
+        w = _pt(art get("width"))
+        hw = w * art get("headwidth") / 2
+        hl = w * art get("headlength")
+        pivot = art get("pivot")
+        art get("xs") size times { |i|
+            x = art get("xs") at(i)
+            y = art get("ys") at(i)
+            u = art get("us") at(i) / sc
+            v = art get("vs") at(i) / sc
+            (_ok(x) && _ok(y) && _ok(u) && _ok(v)) ifTrue {
+                // the arrow's tail and tip, in data units, by its pivot
+                tx = x
+                ty = y
+                (pivot == "mid") ifTrue { tx = x - (u / 2); ty = y - (v / 2) }
+                (pivot == "tip") ifTrue { tx = x - u; ty = y - v }
+                x0 = _px(tx)
+                y0 = _py(ty)
+                x1 = _px(tx + u)
+                y1 = _py(ty + v)
+                dx = x1 - x0
+                dy = y1 - y0
+                len = Math sqrt((dx * dx) + (dy * dy))
+                (len > 0.5) ifTrue {
+                    c = (values != nil) ifTrue { _cellColor(art, lut, values at(i)) ?? art get("color") } ifFalse { art get("color") }
+                    ux = dx / len
+                    uy = dy / len
+                    head = Math min(hl, len * 0.6)
+                    half = hw * (head / hl)
+                    bx = x1 - (ux * head)
+                    by = y1 - (uy * head)
+                    cv line(x0, y0, bx, by, #{stroke: c, width: w, alpha: art get("alpha"), cap: "butt"})
+                    cv polygon([x1, bx - (uy * half), bx + (uy * half)], [y1, by + (ux * half), by - (ux * half)],
+                               #{fill: c, alpha: art get("alpha")})
+                }
+            }
+        }
+    }
+
     _drawSpan(cv, art) {
         b = plotBox
         a = 0
@@ -1625,8 +1919,7 @@ PlotAxes = Object clone {
                     x1 = _px(xe at(i + 1))
                     y0 = _py(ye at(j))
                     y1 = _py(ye at(j + 1))
-                    style = hair ifTrue { #{fill: c, stroke: c, width: 1.0} } ifFalse { #{fill: c, alpha: alpha} }
-                    cv rect(Math min(x0, x1), Math min(y0, y1), (x1 - x0) abs, (y1 - y0) abs, style)
+                    cv rect(Math min(x0, x1), Math min(y0, y1), (x1 - x0) abs, (y1 - y0) abs, _cellStyle(art, c))
                 }
             }
         }
@@ -2151,7 +2444,7 @@ PlotAxes = Object clone {
     _legendHandle(cv, a, hx, y, fs, handle) {
         k = a get("kind")
         color = PlotColor hex(a get("color") ?? "#000000")
-        (k == "line" || k == "hline" || k == "vline" || k == "contour") ifTrue {
+        (k == "line" || k == "hline" || k == "vline" || k == "contour" || k == "quiver") ifTrue {
             ls = a get("linestyle") ?? "-"
             lw = _pt(a get("linewidth") ?? _rc("lines.linewidth"))
             ((ls != "none") && (ls != "")) ifTrue {
@@ -2180,7 +2473,7 @@ PlotAxes = Object clone {
             cv rect(hx, y - (fs * 0.35), handle, fs * 0.7, #{fill: a get("color"), alpha: a get("alpha"),
                                                              stroke: a get("edgecolor"), width: _pt(1)})
         }
-        (k == "bars" || k == "fill" || k == "wedge") ifTrue {
+        (k == "bars" || k == "fill" || k == "wedge" || k == "polygon") ifTrue {
             fill = (a get("colors") != nil) ifTrue { a get("colors") first } ifFalse { a get("color") }
             cv rect(hx, y - (fs * 0.35), handle, fs * 0.7, #{fill: fill, alpha: a get("alpha"), stroke: a get("edgecolor"), width: _pt(1)})
         }
@@ -2468,6 +2761,24 @@ PlotAxes = Object clone {
                 incX value(e at(0)); incX value(e at(1))
                 incY value(e at(2) - (a get("sy") / 3)); incY value(e at(3) + (a get("sy") / 3))
             }
+            (k == "polygon") ifTrue {
+                a get("polys") each { |pp| pp at(0) each(incX); pp at(1) each(incY) }
+            }
+            (k == "quadmesh") ifTrue {
+                a get("xs") each { |r| r each(incX) }
+                a get("ys") each { |r| r each(incY) }
+                useX ifTrue { tight setAt(0, true) }
+                useY ifTrue { tight setAt(1, true) }
+            }
+            (k == "quiver") ifTrue {
+                a get("xs") each(incX)
+                a get("ys") each(incY)
+                sc = a get("scale")
+                a get("xs") size times { |i|
+                    incX value(a get("xs") at(i) + (a get("us") at(i) / sc))
+                    incY value(a get("ys") at(i) + (a get("vs") at(i) / sc))
+                }
+            }
             (k == "mesh") ifTrue {
                 incX value(a get("xedges") first); incX value(a get("xedges") last)
                 incY value(a get("yedges") first); incY value(a get("yedges") last)
@@ -2703,6 +3014,7 @@ PlotAxes = Object clone {
                 markerfacecolor: opts get("markerfacecolor") ?? opts get("mfc"),
                 markeredgecolor: opts get("markeredgecolor") ?? opts get("mec"),
                 label: opts get("label"), alpha: opts get("alpha")}
+        _adopt(art)
         artists append(art)
         art
     }
@@ -2737,6 +3049,7 @@ PlotAxes = Object clone {
         } ifFalse {
             art set("color", PlotColor hex(c ?? _nextCycle))
         }
+        _adopt(art)
         artists append(art)
         art
     }

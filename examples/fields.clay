@@ -1,0 +1,99 @@
+// Fills, meshes, vector fields and polar axes: fill and fillBetweenx,
+// pcolormesh on edges and on a curved grid, quiver, and polar plots (a
+// spiral, a radar chart, a wind rose, a scatter). Writes
+// examples/out/fields.png and polar.png (and .svg).
+// Run from the brick's directory: clay examples/fields.clay
+import("plot")
+
+out = "examples/out"
+(File isDir(out)) ifFalse { File mkdir(out) }
+
+[fig, axs] = Plot subplots(2, 2, #{figsize: [10, 8]})
+
+// fill and fillBetweenx
+ax = axs at(0) at(0)
+ax fill([0, 1, 0.5], [0, 0, 1], #{alpha: 0.5, label: "triangle"})
+ax fill([[1.2, 2, 2, 1.2], [2.3, 3, 2.6]], [[0, 0, 1, 1], [0, 0.3, 1]], #{color: "C2", edgecolor: "k", label: "two more"})
+ys = (0..40) map { |i| i / 40.0 }
+ax fillBetweenx(ys, ys map { |y| 3.2 + (0.3 * Math sin(y * 6)) }, 3.6, #{color: "C3", alpha: 0.6, label: "fillBetweenx"})
+ax legend(#{loc: "upper left"})
+ax title("fill, fillBetweenx")
+
+// pcolormesh on edges, with centres, cells left empty
+ax = axs at(0) at(1)
+C = (0..9) map { |j| (0..14) map { |i| ((i - 7) * (j - 4)) / 10.0 } }
+C at(3) setAt(5, nil)
+pm = ax pcolormesh((0..15) map { |i| i * 0.5 }, (0..10) map { |j| j * j * 0.1 }, C, #{cmap: "RdBu", edgecolors: "white", linewidth: 0.3})
+ax colorbar(pm)
+ax title("pcolormesh, uneven rows")
+
+// pcolormesh on a curved grid
+ax = axs at(1) at(0)
+nr = 12
+nt = 24
+X = (0..nr) map { |r| (0..nt) map { |t| (1 + r * 0.25) * Math cos((t * Math pi) / nt) } }
+Y = (0..nr) map { |r| (0..nt) map { |t| (1 + r * 0.25) * Math sin((t * Math pi) / nt) } }
+C2 = (0..(nr - 1)) map { |r| (0..(nt - 1)) map { |t| Math sin(t / 3.0) + (r / 6.0) } }
+ax pcolormesh(X, Y, C2, #{cmap: "viridis"})
+ax axis("equal")
+ax title("pcolormesh, mesh grid")
+
+// quiver: a rotating field coloured by speed
+ax = axs at(1) at(1)
+gx = (0..12) map { |i| -3 + (i * 0.5) }
+U = gx map { |y| gx map { |x| 0 - y } }
+V = gx map { |y| gx map { |x| x } }
+speed = gx map { |y| gx map { |x| Math sqrt((x * x) + (y * y)) } }
+q = ax quiver(gx, gx, U, V, speed, #{cmap: "plasma"})
+ax colorbar(q, #{label: "speed"})
+ax axis("equal")
+ax title("quiver")
+fig savefig(out + "/fields.png")
+fig savefig(out + "/fields.svg")
+
+Plot close
+
+[fig, axs] = Plot subplots(2, 2, #{figsize: [10, 10], projection: "polar"})
+
+// a spiral and a rose
+ax = axs at(0) at(0)
+th = (0..200) map { |i| (i * 4 * Math pi) / 200 }
+ax plot(th, th map { |t| t / 4 }, #{label: "spiral"})
+ax plot(th, th map { |t| 2 * (Math cos(2 * t)) abs }, "--", #{label: "rose"})
+ax legend(#{loc: "lower left", bboxToAnchor: [-0.1, -0.1]})
+ax title("plot")
+
+// a radar chart: categories round the circle, closed areas
+ax = axs at(0) at(1)
+cats = ["speed", "accuracy", "memory", "latency", "cost"]
+n = cats size
+angles = (0..(n - 1)) map { |i| (i * 2 * Math pi) / n }
+ax setThetaZeroLocation("N")
+ax setThetaDirection(-1)
+ax xticks(angles, cats)
+[[4, 3, 2, 5, 3], [3, 5, 4, 2, 4]] each { |vals|
+    ax fill(angles, vals, #{alpha: 0.25})
+    ax plot(angles + [angles first], vals + [vals first], "o-", #{ms: 4})
+}
+ax setRmax(5)
+ax title("radar (fill)")
+
+// a wind rose: bars as wedges, clockwise from north
+ax = axs at(1) at(0)
+ax setThetaZeroLocation("N")
+ax setThetaDirection(-1)
+dirs = (0..15) map { |i| (i * 2 * Math pi) / 16 }
+ax bar(dirs, dirs map { |d| 2 + (3 * (Math sin(d * 2) + 1)) }, #{width: (2 * Math pi) / 16, color: "C0", alpha: 0.8, edgecolor: "white"})
+ax bar(dirs, dirs map { |d| 1 + Math cos(d) + 1 }, #{width: (2 * Math pi) / 16, color: "C1", alpha: 0.9, edgecolor: "white"})
+ax title("wind rose (bar)")
+
+// scatter and a marked angle
+ax = axs at(1) at(1)
+pts = (0..60) map { |i| [(i * 2.39996) % (2 * Math pi), Math sqrt(i) / 2] }
+ax scatter(pts map { |p| p at(0) }, pts map { |p| p at(1) }, #{c: pts map { |p| p at(1) }, cmap: "viridis"})
+ax annotate("here", [Math pi / 4, 3.5], [Math pi / 2, 4.5], #{arrowprops: #{arrowstyle: "->"}})
+ax setRlabelPosition(100)
+ax title("scatter, annotate")
+fig savefig(out + "/polar.png")
+fig savefig(out + "/polar.svg")
+"wrote examples/out/fields.png and polar.png" println

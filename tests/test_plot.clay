@@ -254,6 +254,147 @@ Test describe("Dashboard charts") {
     }
 }
 
+Test describe("Fills, meshes and fields") {
+    Test it("fills polygons and between curves of x") {
+        Plot close
+        f = Plot fill([0, 1, 0.5], [0, 0, 1], #{label: "tri"})
+        Test assertEqual([f get("kind"), f get("polys") size], ["polygon", 1])
+        two = Plot fill([[2, 3, 3], [4, 5, 4.5]], [[0, 0, 1], [0, 0, 1]], #{color: "C2"})
+        Test assertEqual(two get("polys") size, 2)
+        fx = Plot fillBetweenx([0, 1, 2], [1, 2, 1], 0)
+        Test assertEqual(fx get("polys") first first, [1, 2, 1, 0, 0, 0])
+        Test assertTrue(Plot xlim at(1) >= 5)
+        Plot legend
+        svg = Plot toSvg
+        Test assertTrue(svg contains(">tri</text>"))
+        Test assertRaises({ Plot fill([1, 2], [1]) })
+        Plot close
+    }
+    Test it("colours a mesh of cells") {
+        Plot close
+        C = [[1, 2, 3], [4, nil, 6]]
+        m = Plot pcolormesh(C)
+        Test assertEqual([m get("kind"), m get("xedges"), m get("yedges")], ["mesh", [0, 1, 2, 3], [0, 1, 2]])
+        Test assertEqual([m get("vmin"), m get("vmax")], [1, 6])
+        Test assertEqual(Plot xlim, [0, 3])
+        // centres instead of edges
+        c = Plot pcolormesh([10, 20, 30], [0, 1], C)
+        Test assertEqual(c get("xedges"), [5, 15, 25, 35])
+        // mesh grids of corners
+        X = [[0, 1, 2, 3], [0.5, 1.5, 2.5, 3.5], [1, 2, 3, 4]]
+        Y = [[0, 0, 0, 0], [1, 1, 1, 1], [2, 2, 2, 2]]
+        q = Plot pcolor(X, Y, C, #{edgecolors: "white"})
+        Test assertEqual(q get("kind"), "quadmesh")
+        Plot colorbar(q)
+        Test assertTrue(Plot toSvg contains("<polygon"))
+        Test assertRaises({ Plot pcolormesh([1, 2], [1, 2], C) })
+        Test assertRaises({ Plot pcolormesh(X, Y slice(0, 2), C) })
+        Plot close
+    }
+    Test it("draws arrows of a vector field") {
+        Plot close
+        q = Plot quiver([0, 1, 2], [0, 1], [[1, 0, -1], [1, 0, -1]], [[0, 1, 0], [0, 1, 0]])
+        Test assertEqual([q get("xs") size, q get("xs") at(4), q get("ys") at(4)], [6, 1, 1])
+        Test assertTrue(q get("scale") > 0)
+        svg = Plot toSvg
+        Test assertEqual(count value(svg, "<polygon"), 6)                  // a head each
+        c = Plot quiver([0, 1], [0, 0], [1, 1], [0, 1], [1, 2], #{scale: 2, pivot: "mid"})
+        Test assertEqual([c get("scale"), c get("values")], [2, [1, 2]])
+        Test assertRaises({ Plot quiver([1, 2], [1]) })
+        Test assertRaises({ Plot quiver([1], [1], [1]) })
+        Plot close
+    }
+}
+
+Test describe("Polar axes") {
+    Test it("turns angle and radius into x and y") {
+        Plot close
+        ax = Plot subplot(1, 1, 1, #{projection: "polar"})
+        Test assertEqual(ax type, "PlotPolarAxes")
+        line = ax plot([0, Math pi / 2], [1, 2])
+        Test assertTrue((line get("xs") at(0) - 1) abs < 0.001)
+        Test assertTrue((line get("ys") at(1) - 2) abs < 0.001)            // 90 degrees: straight up
+        Test assertEqual(ax _rmax, 2)
+        ax setThetaZeroLocation("N")
+        ax setThetaDirection(-1)
+        Test assertTrue((line get("xs") at(1) - 2) abs < 0.001)            // now 90 degrees is east
+        Test assertTrue((line get("ys") at(0) - 1) abs < 0.001)            // and 0 is north
+        ax setRmax(5)
+        Test assertEqual(ax ylim, [0, 5])
+        svg = Plot toSvg
+        Test assertTrue(svg contains(">90°</text>"))
+        Test assertRaises({ ax setThetaZeroLocation("up") })
+        Test assertRaises({ ax setThetaDirection(2) })
+        Plot close
+    }
+    Test it("draws radar charts, wedges and labelled spokes") {
+        Plot close
+        [fig, axs] = Plot subplots(1, 2, #{projection: "polar"})
+        r = axs first
+        r xticks([0, 2, 4], ["a", "b", "c"])
+        r fill([0, 2, 4], [1, 2, 3], #{alpha: 0.3})
+        b = axs last bar([0, Math pi], [2, 3], #{width: 1})
+        Test assertEqual([b get("kind"), b get("polys") size], ["polygon", 2])
+        Test assertEqual(axs last _rmax, 3)
+        svg = fig toSvg
+        Test assertTrue(svg contains(">b</text>"))
+        Test assertRaises({ axs last barh([1], [1]) })
+        Test assertRaises({ Plot subplots(1, 1, #{projection: "mercator"}) })
+        Plot close
+        Plot polar([0, 1, 2], [1, 2, 1], "o-")
+        Test assertEqual(Plot gca type, "PlotPolarAxes")
+        Test assertEqual(Plot gca artists first get("mxs") size, 3)        // markers at the points
+        Plot cla
+        Test assertEqual(Plot gca aspect, "equal")                         // still round
+        Plot close
+    }
+}
+
+Test describe("ML: embeddings, weights, saliency") {
+    Test it("finds principal components") {
+        // points along a line (2, 1) with a little spread across it
+        rows = (0..39) map { |i| t = i - 20; [(2 * t) + ((i % 3) - 1) * 0.1, t + ((i % 2) * 0.1)] }
+        p = PlotML pca(rows, 2)
+        c = p get("components") first
+        Test assertTrue((((c at(0) / c at(1)) - 2) abs) < 0.05)            // along (2, 1)
+        Test assertTrue((p get("explained") first) > 0.99)
+        Test assertEqual(p get("projected") size, 40)
+        Test assertTrue((((p get("projected") map { |r| r first }) sum) abs) < 0.01)   // centred
+        // wide data takes the row-by-row path
+        wide = (0..29) map { |i| (0..79) map { |j| (i * Math sin(j)) + (j * 0.01) } }
+        pw = PlotML pca(wide, 1)
+        Test assertTrue(pw get("explained") first > 0.9)
+        Test assertRaises({ PlotML pca([[1, 2]], 1) })
+        Test assertRaises({ PlotML pca([[1, 2], [3]], 1) })
+        Test assertRaises({ PlotML pca([[1, 2], [3, 4]], 3) })
+    }
+    Test it("plots an embedding by class") {
+        Plot close
+        rows = (0..29) map { |i| [i % 3, (i % 3) * 2 + (i * 0.01), i * 0.001] }
+        p = Plot embedding(rows, (0..29) map { |i| i % 3 }, #{classNames: ["a", "b", "c"]})
+        Test assertEqual(Plot gca artists size, 3)
+        svg = Plot toSvg
+        Test assertTrue(svg contains(">c</text>") && svg contains("PC1 ("))
+        Plot close
+    }
+    Test it("draws weight histograms and overlays") {
+        Plot close
+        fig = Plot weightHistograms(#{first: [[0.1, 0.2], [0.3, -0.1]], second: [1, 2, 3]}, #{bins: 5})
+        Test assertEqual(fig axes size, 2)
+        Test assertTrue(fig toSvg contains("first: "))
+        Test assertRaises({ Plot weightHistograms(42) })
+        Plot close
+        img = (0..7) map { |r| (0..7) map { |c| (r + c) / 14.0 } }
+        heat = [[0, 1], [1, 0]]
+        h = Plot overlay(img, heat, #{alpha: 0.4})
+        Test assertEqual([h get("nrows"), h get("ncols")], [8, 8])          // scaled to the image
+        Test assertTrue(((h get("rows") at(0) at(0)) abs) < 0.001)
+        Test assertTrue((h get("rows") at(0) at(7) - 1) abs < 0.001)
+        Test assertEqual(PlotML _resample([[0, 2]], 1, 3), [[0, 1, 2]])
+        Plot close
+    }
+}
+
 Test describe("Math text") {
     runs = { |s| (PlotMath runs(s)) map { |r| [r at(0), Math round(r at(1) * 100), Math round(r at(2) * 100)] } }
     Test it("finds math between dollar signs") {
