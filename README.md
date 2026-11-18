@@ -4,8 +4,10 @@ Charts and figures for [Clay](https://github.com/mseminatore/clay), in the style
 matplotlib's `pyplot`: line plots, scatter plots, bar charts, histograms, pies, stacked areas,
 error bars, images and heatmaps, log scales, subplots, legends, colour bars and colormaps.
 Figures are saved as PNG, drawn anti-aliased by
-[clay-image](https://github.com/mseminatore/clay-image), or as SVG, which any browser shows
-and which web pages and Markdown can embed, or drawn in the terminal, live as a network trains.
+[clay-image](https://github.com/mseminatore/clay-image), as SVG, which any browser shows
+and which web pages and Markdown can embed, as PDF (vector, by
+[clay-pdf](https://github.com/mseminatore/clay-pdf)), alone or inside a larger document, or
+drawn in the terminal, live as a network trains.
 
 If you know matplotlib, you already know most of it: the function names, format strings
 (`"r--"`, `"o-"`), colour names (`"C1"`, `"tab:orange"`), colormaps (`"viridis"`) and
@@ -19,7 +21,7 @@ Plot plot(epochs, train, #{label: "train"})
 Plot plot(epochs, valid, "--", #{label: "validation"})
 Plot xlabel("epoch"); Plot ylabel("loss"); Plot title("Learning curve")
 Plot grid; Plot legend
-Plot savefig("loss.png")            // or "loss.svg"
+Plot savefig("loss.png")            // or "loss.svg", "loss.pdf"
 ```
 
 ![A learning curve](docs/images/learning_curve.svg)
@@ -138,8 +140,9 @@ return the artist they add, a Dict (`line get("color")`, `line set("label", "new
 | `Plot gcf`, `Plot gca`, `Plot sca(ax)` | The current figure and axes; make an axes current |
 | `fig axes`, `fig ax(row, col)` | All the figure's axes; the one at a grid position |
 | `suptitle(s, opts)` | A title above all the subplots |
-| `savefig(path, opts)` | Save; the extension picks the format, `.png` or `.svg`. `opts`: `dpi`, to save at another resolution than the figure's (`#{dpi: 200}` for print). |
-| `toPng(dpi)`, `toSvg(dpi)` | The figure as a PNG file's bytes or as SVG text, e.g. to return from a web handler |
+| `savefig(path, opts)` | Save; the extension picks the format, `.png`, `.svg` or `.pdf`. `opts`: `dpi`, to save at another resolution than the figure's (`#{dpi: 200}` for print; a PDF is vector graphics and has none). |
+| `toPng(dpi)`, `toSvg(dpi)`, `toPdf` | The figure as a PNG file's bytes, as SVG text or as a PDF file's bytes, e.g. to return from a web handler |
+| `drawPdf(page, x, y, width)` | Draw the figure on a clay-pdf page with its top-left corner at (x, y), in points, scaled to `width` (default: its size at 72 points an inch); returns the height it takes. See PDF. |
 | `toCanvas(dpi)` | The figure drawn on a clay-image `Canvas`, to draw more on it, or `toImage` for an `Image` |
 | `show` | Save to a temporary PNG and open it in the system's image viewer. `Plot show` then starts a fresh figure, as pyplot does. Returns the file's path. |
 | `Plot close`, `Plot clf` | Forget the current figure; clear its axes |
@@ -402,9 +405,40 @@ dark and light backgrounds alike. The terminal needs a font with Braille charact
 Terminal, macOS Terminal and most Linux terminals have one; the old Windows console host's
 fonts do not).
 
+## PDF
+
+`savefig("f.pdf")` writes a one-page PDF the figure's size: vector lines, shapes and text,
+sharp at any zoom, with images embedded as PNG. `drawPdf` puts a figure inside a larger
+document, between paragraphs of a report:
+
+```clay norun
+import("plot")
+
+doc = Pdf new()                                   // Pdf, PdfPage, PdfFlow: clay-pdf
+flow = doc flow(72)
+flow font("Helvetica-Bold", 16) paragraph("Training report")
+flow font("Helvetica", 11) paragraph("Loss fell steadily for 40 epochs.")
+
+fig = Plot figure(#{figsize: [6, 3]})
+Plot plot(losses)
+Plot title("Loss")
+h = flow width * 0.5                              // a 6 x 3 figure, full width
+page = flow ensure(h)                             // a new page if it won't fit
+fig drawPdf(page, flow x, flow y, flow width)
+flow advance(h)
+flow paragraph("The validation loss followed it.")
+doc save("report.pdf")
+```
+
+Text is Helvetica, one of the fonts every PDF reader has (none is embedded), measured with
+its metrics, so the layout differs a little from PNG and SVG; it covers Windows-1252
+(Western European letters, `°`, `µ`, `·`), and other characters show as `?`. Viewers smooth
+images they enlarge, so a small image (a 28 x 28 `imshow`) is enlarged into blocks first
+(about 4 pixels a point), as matplotlib does.
+
 ## Limitations
 
-- Text is DejaVu Sans only, in one weight (`fontweight` applies to SVG alone). SVG asks the
+- Text is DejaVu Sans only (Helvetica in PDF), in one weight (`fontweight` applies to SVG and PDF alone). SVG asks the
   viewer for DejaVu Sans and the layout measures text with it; a viewer without the font uses
   another sans-serif, which may sit a little closer or further than intended.
 - In SVG, images are embedded as base64 PNG, about a third larger than the PNG itself (a
@@ -417,14 +451,14 @@ fonts do not).
 clay bricks add github.com/mseminatore/clay-plot plot
 ```
 
-It needs Clay 0.3.6 or later. clay-plot depends on [clay-image](https://github.com/mseminatore/clay-image), a native brick:
+It needs Clay 0.3.7 or later. clay-plot depends on [clay-pdf](https://github.com/mseminatore/clay-pdf) (pure Clay) and [clay-image](https://github.com/mseminatore/clay-image), a native brick:
 its C code (stb_image, and its canvas) is compiled the first time it is imported, which needs a C compiler,
 and `clay bricks add` asks before installing it.
 
 ## Develop
 
 ```sh
-clay bricks install                # fetches clay-image into bricks/
+clay bricks install                # fetches clay-image and clay-pdf into bricks/
 clay tests/test_plot.clay          # a brick can import itself by name
 clay examples/gallery.clay         # writes example figures to examples/out/
 clay examples/ml.clay
@@ -440,8 +474,8 @@ The code is in `src/`: `main.clay` (`Plot`, the pyplot-style functions and `rc`)
 `figure.clay` (`PlotFigure`: layout and saving), `axes.clay` (`PlotAxes`: artists, scales,
 ticks, legend, drawing), `ticks.clay` (`PlotTicks`: ticks, number formats, logarithms),
 `color.clay` (`PlotColor`), `ml.clay` (`PlotML`), `live.clay` (`PlotLive`), and the backends
-`svg.clay` (`PlotSvg`), `png.clay` (`PlotPng`, on clay-image's `Canvas`) and `term.clay`
-(`PlotTerm`, text for terminals). Axes
+`svg.clay` (`PlotSvg`), `png.clay` (`PlotPng`, on clay-image's `Canvas`), `pdf.clay`
+(`PlotPdf`, on a clay-pdf page) and `term.clay` (`PlotTerm`, text for terminals). Axes
 draw through a handful of primitives (`line`, `polyline`, `polygon`, `rect`, `circle`, `text`,
 `image`, `clip`, `measure`) listed at the top of `svg.clay`, so a new backend implements just
 those.
