@@ -31,9 +31,12 @@ PlotPdf = Object clone {
         (background != nil) ifTrue { page fillColor(background) fillRect(0, 0, w, h) }
     }
 
-    // Close the figure's graphics state; the page
+    // Close the figure's graphics state, and set the page's text alignment
+    // back to its defaults (left, alphabetic; it is not graphics state, so
+    // restore leaves it as the figure's text set it); the page
     finish() {
         page restore
+        page textAlign("left") textBaseline("alphabetic")
         page
     }
 

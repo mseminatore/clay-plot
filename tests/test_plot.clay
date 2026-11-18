@@ -1184,6 +1184,10 @@ Test describe("PDF") {
         Test assertTrue(page content contains("0.5 0 0 0.5 72 296 cm"))
         Test assertTrue(pdfOk value(doc render))
         Test assertEqual(fig dpi, 100)                          // put back after drawing
+        // text drawn after the figure is placed as before it, not as its tick labels were
+        n = page content length
+        page text(72, 400, "After")
+        Test assertTrue((page content slice(n, page content length)) contains(" 72 392 Td (After) Tj"))
     }
     Test it("names .pdf when it can't save") {
         e = Test assertRaises({ Plot savefig("chart.bmp") })
