@@ -1,0 +1,340 @@
+// PlotMath -- math in text, as matplotlib's mathtext: "$\sigma^2$", "$x_i$"
+//
+//   Plot ylabel("$\\sigma^2$ (variance)")
+//   Plot title("Learning rate $\\eta = 10^{-3}$")
+//
+// Text between a pair of $ signs is math: ^ raises and _ lowers the next
+// character or {group} (they nest: $e^{-x^2}$), \alpha and the other Greek
+// letters and common symbols (\pm \times \cdot \leq \geq \neq \approx
+// \infty \partial \nabla \sum \sqrt \rightarrow ...) are their characters,
+// and - is a minus sign. \mathrm{...}, \text{...} and \frac{a}{b} (as a/b)
+// work too. Outside math, \$ is a dollar sign; a lone $ is just text.
+//
+// The backends' text and measure come here when a text has math: it is
+// broken into runs (text, size, raise), laid out along the baseline, and
+// each run drawn by the backend. The terminal draws scripts as Unicode
+// superscript and subscript characters instead.
+
+PlotMath = Object clone {
+    SUP = 0.7               // a script's size, of its base's
+    RISE = 0.42             // how far a superscript rises, in its base's em
+    DROP = 0.18             // how far a subscript drops
+
+    // Is there math in s: two $ that aren't \$
+    has(s) {
+        (s == nil) ifTrue { return false }
+        t = s toString
+        (t contains("$")) ifFalse { return false }
+        n = 0
+        i = 0
+        { i < t length } whileTrue {
+            c = t at(i)
+            (c == "\\") ifTrue { i = i + 2 } ifFalse {
+                (c == "$") ifTrue { n = n + 1 }
+                i = i + 1
+            }
+        }
+        n >= 2
+    }
+
+    // The runs of s: [[text, scale, rise], ...], scale a fraction of the
+    // font size and rise in ems of it (up is positive)
+    runs(s) {
+        t = s toString
+        out = []
+        plain = ""
+        i = 0
+        n = t length
+        { i < n } whileTrue {
+            c = t at(i)
+            ((c == "\\") && (i + 1 < n) && (t at(i + 1) == "$")) ifTrue {
+                plain = plain + "$"
+                i = i + 2
+            } ifFalse {
+                close = (c == "$") ifTrue { _closing(t, i + 1) } ifFalse { -1 }
+                (close > 0) ifTrue {
+                    _add(out, plain, 1.0, 0.0)
+                    plain = ""
+                    _math(t slice(i + 1, close), 1.0, 0.0, out)
+                    i = close + 1
+                } ifFalse {
+                    plain = plain + c
+                    i = i + 1
+                }
+            }
+        }
+        _add(out, plain, 1.0, 0.0)
+        out
+    }
+
+    // The index of the $ that closes math opened before start, or -1
+    _closing(t, start) {
+        i = start
+        { i < t length } whileTrue {
+            c = t at(i)
+            (c == "\\") ifTrue { i = i + 2 } ifFalse {
+                (c == "$") ifTrue { return i }
+                i = i + 1
+            }
+        }
+        -1
+    }
+
+    // Add text as a run, joining it to the last run when they match
+    _add(out, text, scale, rise) {
+        (text == "") ifTrue { return nil }
+        last = (out size > 0) ifTrue { out last } ifFalse { nil }
+        ((last != nil) && (last at(1) == scale) && (last at(2) == rise)) ifTrue {
+            last setAt(0, last at(0) + text)
+        } ifFalse {
+            out append([text, scale, rise])
+        }
+    }
+
+    // Math source m into runs, at a scale and rise
+    _math(m, scale, rise, out) {
+        i = 0
+        n = m length
+        { i < n } whileTrue {
+            c = m at(i)
+            ((c == "^") || (c == "_")) ifTrue {
+                [arg, next] = _argument(m, i + 1)
+                up = (c == "^") ifTrue { RISE } ifFalse { 0 - DROP }
+                _math(arg, scale * SUP, rise + (up * scale), out)
+                i = next
+            } ifFalse {
+                (c == "{") ifTrue {
+                    close = _group(m, i)
+                    _math(m slice(i + 1, close), scale, rise, out)
+                    i = close + 1
+                } ifFalse {
+                    (c == "\\") ifTrue {
+                        [name, next] = _command(m, i)
+                        i = _expand(name, m, next, scale, rise, out)
+                    } ifFalse {
+                        _add(out, (c == "-") ifTrue { PlotTicks minus } ifFalse { c }, scale, rise)
+                        i = i + 1
+                    }
+                }
+            }
+        }
+    }
+
+    // A command's name (letters after \, or one other character) and where it ends
+    _command(m, i) {
+        j = i + 1
+        { (j < m length) && ("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ" contains(m at(j))) } whileTrue { j = j + 1 }
+        (j == i + 1) ifTrue { j = Math min(i + 2, m length) }
+        [m slice(i + 1, j), j]
+    }
+
+    // A command's output; returns where parsing goes on
+    _expand(name, m, next, scale, rise, out) {
+        sym = _symbols get(name)
+        (sym != nil) ifTrue { _add(out, sym, scale, rise); return next }
+        // font changes: one font here, so their content as it is
+        (([("mathrm"), "text", "mathit", "mathbf", "mathsf", "mathtt", "rm", "operatorname",
+           "mathcal", "mathbb", "mathfrak", "mathscr", "boldsymbol", "bm"] find { |s| s == name }) != nil) ifTrue {
+            [arg, after] = _argument(m, next)
+            _math(arg, scale, rise, out)
+            return after
+        }
+        // function names, upright as written: \sin x, \log p, \max_i
+        (([("sin"), "cos", "tan", "log", "ln", "exp", "max", "min", "arg", "lim", "det", "sup", "inf",
+           "sinh", "cosh", "tanh", "argmax", "argmin", "softmax", "Pr", "deg", "dim", "gcd"] find { |s| s == name }) != nil) ifTrue {
+            _add(out, name, scale, rise)
+            return next
+        }
+        // accents: the bundled font has none, so their letter alone
+        ((["hat", "bar", "tilde", "vec", "dot", "ddot", "widehat", "widetilde", "overline", "check", "acute", "grave"] find { |s| s == name }) != nil) ifTrue {
+            [arg, after] = _argument(m, next)
+            _math(arg, scale, rise, out)
+            return after
+        }
+        (name == "frac") ifTrue {
+            [a, mid] = _argument(m, next)
+            [b, after] = _argument(m, mid)
+            _math(a, scale, rise, out)
+            _add(out, "/", scale, rise)
+            _math(b, scale, rise, out)
+            return after
+        }
+        (name == "sqrt") ifTrue {
+            [a, after] = _argument(m, next)
+            _add(out, "\xe2\x88\x9a", scale, rise)
+            _math(a, scale, rise, out)
+            return after
+        }
+        // spacing
+        (([",", ";", ":", " ", "quad"] find { |s| s == name }) != nil) ifTrue { _add(out, " ", scale, rise); return next }
+        (name == "!") ifTrue { return next }
+        // an escaped character: \{ \} \$ \% \_ \# \&
+        ((name length == 1) && ("{}$%_#&^" contains(name))) ifTrue { _add(out, name, scale, rise); return next }
+        // unknown: as written, so the mistake shows
+        _add(out, "\\" + name, scale, rise)
+        next
+    }
+
+    // What ^, _ or a command takes: a {group}, a \command or one character
+    _argument(m, i) {
+        { (i < m length) && (m at(i) == " ") } whileTrue { i = i + 1 }
+        (i >= m length) ifTrue { return ["", i] }
+        (m at(i) == "{") ifTrue {
+            close = _group(m, i)
+            return [m slice(i + 1, close), close + 1]
+        }
+        (m at(i) == "\\") ifTrue {
+            [name, next] = _command(m, i)
+            return ["\\" + name, next]
+        }
+        [m at(i), i + 1]
+    }
+
+    // The index of the } closing the { at i (or the end)
+    _group(m, i) {
+        depth = 0
+        j = i
+        { j < m length } whileTrue {
+            c = m at(j)
+            (c == "\\") ifTrue { j = j + 2 } ifFalse {
+                (c == "{") ifTrue { depth = depth + 1 }
+                (c == "}") ifTrue {
+                    depth = depth - 1
+                    (depth == 0) ifTrue { return j }
+                }
+                j = j + 1
+            }
+        }
+        m length
+    }
+
+    // ---- layout -----------------------------------------------------------
+
+    // The runs as the backend draws them: its own split (PDF: into fonts)
+    _laidOut(cv, s) {
+        rs = runs(s)
+        (cv hasMethod("_fontRuns")) ifTrue { return cv _fontRuns(rs) }
+        // PNG and SVG: the bundled font's characters (fallbacks for the rest)
+        rs map { |r| [forFont(r at(0)), r at(1), r at(2), nil] }
+    }
+
+    _runWidth(cv, r, size) {
+        (r at(3) == nil) ifTrue { return cv _plainMeasure(r at(0), size * r at(1)) }
+        cv _plainMeasure(r at(0), size * r at(1), r at(3))
+    }
+
+    // The width of s with math, in the backend's units
+    width(cv, s, size) {
+        (cv hasMethod("superscript")) ifTrue { return cv _plainMeasure(flat(cv, s), size) }
+        (_laidOut(cv, s)) reduce(0) { |w, r| w + _runWidth(cv, r, size) }
+    }
+
+    // Draw s with math at x, y (style as the backends' text: size, anchor,
+    // valign, rotate, color, weight)
+    draw(cv, x, y, s, style) {
+        (cv hasMethod("superscript")) ifTrue { return cv _plainText(x, y, flat(cv, s), style) }
+        st = style ?? #{}
+        size = st get("size") ?? 12
+        rs = _laidOut(cv, s)
+        widths = rs map { |r| _runWidth(cv, r, size) }
+        total = widths sum
+        anchor = st get("anchor") ?? "start"
+        off = (anchor == "middle") ifTrue { 0 - (total / 2) } ifFalse { (anchor == "end") ifTrue { 0 - total } ifFalse { 0 } }
+        rot = st get("rotate") ?? 0
+        rad = (rot * Math pi) / 180
+        ux = Math cos(rad)
+        uy = 0 - Math sin(rad)
+        // down the page in the text's own frame, to the baseline
+        shift = PlotSvg _baselineShift(st get("valign"), size)
+        bx = x - (uy * shift)
+        by = y + (ux * shift)
+        adv = off
+        rs size times { |i|
+            r = rs at(i)
+            up = r at(2) * size
+            px = bx + (ux * adv) + (uy * up)
+            py = by + (uy * adv) - (ux * up)
+            o = Dict clone
+            st each { |k, v| o set(k, v) }
+            o set("size", size * r at(1))
+            o set("anchor", "start")
+            o set("valign", "baseline")
+            (r at(3) != nil) ifTrue { o set("font", r at(3)) }
+            cv _plainText(px, py, r at(0), o)
+            adv = adv + widths at(i)
+        }
+        nil
+    }
+
+    // s as one line for the terminal: scripts as Unicode super- and
+    // subscript characters where there are some, else as written
+    flat(cv, s) {
+        text = ""
+        runs(s) each { |r|
+            t = r at(0)
+            (r at(2) > 0.001) ifTrue { t = cv superscript(t) }
+            (r at(2) < -0.001) ifTrue { t = _subscript(t) }
+            text = text + t
+        }
+        text
+    }
+
+    _subscript(t) {
+        digits = ["\xe2\x82\x80", "\xe2\x82\x81", "\xe2\x82\x82", "\xe2\x82\x83", "\xe2\x82\x84",
+                  "\xe2\x82\x85", "\xe2\x82\x86", "\xe2\x82\x87", "\xe2\x82\x88", "\xe2\x82\x89"]
+        out = ""
+        i = 0
+        { i < t length } whileTrue {
+            c = t at(i)
+            k = "0123456789" indexOf(c)
+            out = out + (((k != nil) && (k >= 0)) ifTrue { digits at(k) } ifFalse { c })
+            i = i + 1
+        }
+        out
+    }
+
+    // \name -> its character
+    _symbols() {
+        (_table == nil) ifTrue {
+            self _table = #{
+                alpha: "α", beta: "β", gamma: "γ", delta: "δ", epsilon: "ε", varepsilon: "ε",
+                zeta: "ζ", eta: "η", theta: "θ", vartheta: "θ", iota: "ι", kappa: "κ", lambda: "λ",
+                mu: "μ", nu: "ν", xi: "ξ", pi: "π", rho: "ρ", sigma: "σ", varsigma: "ς", tau: "τ",
+                upsilon: "υ", phi: "φ", varphi: "φ", chi: "χ", psi: "ψ", omega: "ω",
+                Gamma: "Γ", Delta: "Δ", Theta: "Θ", Lambda: "Λ", Xi: "Ξ", Pi: "Π", Sigma: "Σ",
+                Upsilon: "Υ", Phi: "Φ", Psi: "Ψ", Omega: "Ω",
+                pm: "±", mp: "∓", times: "×", div: "÷", cdot: "·", circ: "°", degree: "°",
+                leq: "≤", le: "≤", geq: "≥", ge: "≥", neq: "≠", ne: "≠", approx: "≈", sim: "∼",
+                equiv: "≡", infty: "∞", partial: "∂", nabla: "∇", sum: "∑", prod: "∏", int: "∫",
+                rightarrow: "→", to: "→", leftarrow: "←", uparrow: "↑", downarrow: "↓",
+                Rightarrow: "⇒", leftrightarrow: "↔", in: "∈", forall: "∀", exists: "∃",
+                propto: "∝", ldots: "…", cdots: "⋯", prime: "′", hbar: "ħ", ell: "ℓ",
+                langle: "⟨", rangle: "⟩", lvert: "|", rvert: "|", vert: "|", star: "⋆", ast: "∗"
+            }
+        }
+        _table
+    }
+    _table = nil
+
+    // Characters the bundled font (a subset of DejaVu Sans) lacks, and what
+    // PNG and SVG draw instead
+    fallbacks() {
+        (_fallbacks == nil) ifTrue {
+            self _fallbacks = #{
+                "∓": "-+", "÷": "/", "≠": "!=", "≈": "~", "∼": "~", "≡": "=", "∂": "d", "∇": "grad ",
+                "∑": "Σ", "∏": "Π", "∫": "S", "→": "->", "←": "<-", "↑": "^", "↓": "v", "⇒": "=>",
+                "↔": "<->", "∈": "in ", "∀": "all ", "∃": "exists ", "∝": "~", "⋯": "…", "′": "'",
+                "ħ": "h", "ℓ": "l", "⟨": "<", "⟩": ">", "⋆": "*", "∗": "*", "√": "sqrt "
+            }
+        }
+        _fallbacks
+    }
+    _fallbacks = nil
+
+    // t with the characters the bundled font lacks replaced
+    forFont(t) {
+        out = t
+        fallbacks each { |k, v| (out contains(k)) ifTrue { out = out replace(k, v) } }
+        out
+    }
+}

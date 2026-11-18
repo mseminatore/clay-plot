@@ -99,7 +99,19 @@ PlotTerm = Object clone {
         }
     }
 
+    // Text, with math ("$\\sigma^2$") laid out by PlotMath
     text(x, y, s, style) {
+        (PlotMath has(s)) ifTrue { return PlotMath draw(self, x, y, s, style) }
+        _plainText(x, y, s, style)
+    }
+
+    // The width of text, math included
+    measure(s, size) {
+        (PlotMath has(s)) ifTrue { return PlotMath width(self, s, size) }
+        _plainMeasure(s, size)
+    }
+
+    _plainText(x, y, s, style) {
         s = s toString
         glyphs = _glyphs(s)
         n = glyphs size
@@ -161,7 +173,7 @@ PlotTerm = Object clone {
     unclip() { self clipBox = nil }
 
     // A text's width in dots: two a character, whatever the size
-    measure(s, size) {
+    _plainMeasure(s, size) {
         (s == nil) ifTrue { return 0 }
         _glyphs(s toString) size * 2
     }

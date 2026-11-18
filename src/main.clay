@@ -34,6 +34,7 @@ import("ticks.clay")
 import("stats.clay")
 import("contour.clay")
 import("dates.clay")
+import("mathtext.clay")
 import("svg.clay")
 import("png.clay")
 import("pdf.clay")
@@ -80,11 +81,25 @@ Plot = Object clone {
 
     // A new figure with a grid of axes: [fig, axs] = Plot subplots(2, 2).
     // axs is one Axes, an Array (one row or column) or an Array of rows.
+    // opts: the figure's (figsize, dpi), and sharex / sharey (true, "col",
+    // "row"), as PlotFigure subplots
     subplots(rows = 1, cols = 1, opts = nil) {
         (rows type == "Dict") ifTrue { opts = rows; rows = 1 }
         (cols type == "Dict") ifTrue { opts = cols; cols = 1 }
         fig = figure(opts)
-        axs = fig subplots(rows, cols)
+        axs = fig subplots(rows, cols, opts)
+        self currentAxes = fig axesList first
+        [fig, axs]
+    }
+
+    // A new figure of axes laid out by name, as matplotlib's subplot_mosaic:
+    // [fig, axs] = Plot subplotMosaic(["AAB", "CCB"]); axs get("A") plot(...).
+    // Each row is a String (a character a cell) or an Array of names; a
+    // name filling a rectangle of cells is one axes over them all; "." is
+    // left empty. opts: the figure's.
+    subplotMosaic(layout, opts = nil) {
+        fig = figure(opts)
+        axs = fig subplotMosaic(layout)
         self currentAxes = fig axesList first
         [fig, axs]
     }
@@ -95,6 +110,17 @@ Plot = Object clone {
         self currentAxes = gcf addSubplot(rows, cols, index)
         currentAxes
     }
+
+    // An axes spanning cells, as matplotlib's subplot2grid, made current:
+    // Plot subplot2grid([3, 3], [0, 0], #{colspan: 3}) (or rowspan, colspan
+    // as numbers)
+    subplot2grid(shape, loc, rowspan = 1, colspan = 1) {
+        self currentAxes = gcf addSubplotGrid(shape, loc, rowspan, colspan)
+        currentAxes
+    }
+
+    // A legend of all the current figure's labelled artists (PlotFigure legend)
+    figlegend(opts = nil) { gcf legend(opts); nil }
 
     // The current figure, made if there is none
     gcf() {

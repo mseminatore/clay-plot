@@ -49,6 +49,12 @@ fig savefig("subplots.svg")
 | `fig, ax = plt.subplots()` | `[fig, ax] = Plot subplots` |
 | `fig, axs = plt.subplots(2, 3)` | `[fig, axs] = Plot subplots(2, 3)`, then `axs at(r) at(c)` |
 | `plt.subplot(1, 2, 1)` | `Plot subplot(1, 2, 1)` |
+| `plt.subplots(2, 2, sharex="col", sharey=True)` | `Plot subplots(2, 2, #{sharex: "col", sharey: true})` |
+| `fig, axd = plt.subplot_mosaic(["AAB", "CCB"])` | `[fig, axd] = Plot subplotMosaic(["AAB", "CCB"])`, then `axd get("A")` |
+| `plt.subplot2grid((3, 3), (0, 0), colspan=3)` | `Plot subplot2grid([3, 3], [0, 0], #{colspan: 3})` |
+| `ax.legend(bbox_to_anchor=(1.02, 1), loc="upper left", ncol=2)` | `ax legend(#{bboxToAnchor: [1.02, 1], loc: "upper left", ncol: 2})` |
+| `fig.legend(loc="outside right")` | `fig legend(#{loc: "outside right"})` or `Plot figlegend(...)` |
+| `plt.ylabel(r"$\sigma^2$")` | `Plot ylabel("$\\sigma^2$")` (Clay strings escape `\` as `\\`) |
 | `ax.set_title("t")`, `ax.set_xlabel("x")` | `ax title("t")`, `ax xlabel("x")` |
 | `ax.set(xlim=(0, 1), title="t")` | `ax set(#{xlim: [0, 1], title: "t"})` |
 | `plt.fill_between(x, y1, y2)` | `Plot fillBetween(x, y1, y2)` |
@@ -122,7 +128,7 @@ return the artist they add, a Dict (`line get("color")`, `line set("label", "new
 | `xlim(lo, hi)`, `ylim(lo, hi)` | Set the range shown (`nil` keeps an end automatic; an Array works too). With no arguments, returns the range in use. |
 | `xticks(values, labels, opts)`, `yticks(...)` | Choose the ticks; `labels` names them, `rotation` turns them. `xticks([])` hides them. |
 | `grid(on, opts)` | Grid lines at the ticks: `grid`, `grid(false)`, `grid(#{axis: "y", color:, linestyle:, alpha:})` |
-| `legend(opts)`, `legend(labels)` | A legend of the labelled artists. `loc`: `"best"` (the default: the corner covering the least data), `"upper right"`, `"upper left"`, `"lower left"`, `"lower right"`, `"right"`, `"center left"`, `"center right"`, `"lower center"`, `"upper center"`, `"center"`. Also `fontsize`, `title`, `framealpha`. An Array of labels names the artists in order. |
+| `legend(opts)`, `legend(labels)` | A legend of the labelled artists. `loc`: `"best"` (the default: the corner covering the least data), `"upper right"`, `"upper left"`, `"lower left"`, `"lower right"`, `"right"`, `"center left"`, `"center right"`, `"lower center"`, `"upper center"`, `"center"`. `bboxToAnchor: [x, y]` (axes fractions, 1.02 just past the right edge) puts the legend's `loc` corner there, outside the axes if you like, and the layout makes room for it. `ncol` lays the entries out in columns. Also `fontsize`, `title`, `framealpha`, `frameon`. An Array of labels names the artists in order. |
 | `twinx`, `twiny` | A second axes over this one sharing its x axis, with its own y axis on the right (`twinx`); or sharing y, with an x axis along the top (`twiny`). Returns the new axes (`Plot twinx` also makes it current). The two share one colour cycle and one title, and a legend on either lists the labelled artists of both. |
 | `axis(mode)` | `"off"` hides the frame, ticks and labels; `"equal"` makes a unit the same length on both axes; `"auto"`; `"tight"`; or `[x0, x1, y0, y1]`. |
 | `invertYaxis` | Turn the y axis upside down |
@@ -135,8 +141,11 @@ return the artist they add, a Dict (`line get("color")`, `line set("label", "new
 | | |
 |---|---|
 | `Plot figure(opts)` | A new current figure. `figsize: [width, height]` in inches (6.4 x 4.8), `dpi` (100), `facecolor`. |
-| `Plot subplots(rows, cols, opts)` | A new figure with a grid of axes: `[fig, axs]`. As in matplotlib, `axs` is one axes for 1 x 1, an Array for one row or column, and an Array of rows otherwise. |
+| `Plot subplots(rows, cols, opts)` | A new figure with a grid of axes: `[fig, axs]`. As in matplotlib, `axs` is one axes for 1 x 1, an Array for one row or column, and an Array of rows otherwise. `sharex`, `sharey`: `true` (all the axes), `"col"` or `"row"` share one range and scale (`xlim`, `xscale` on one set them all), and inner tick labels are left out: x labels but the bottom row's when columns share, y labels but the first column's when rows share. |
+| `Plot subplotMosaic(layout, opts)` | A new figure of named axes, as matplotlib's `subplot_mosaic`: `layout` has a String a row (a character a cell; `"."` is empty) or Arrays of names; a name filling a rectangle of cells is one axes over all of them. Returns `[fig, axs]`, `axs` a Dict by name. |
 | `Plot subplot(rows, cols, index)` | Make the axes at `index` (1-based, along rows) of the current figure current, adding it if needed |
+| `Plot subplot2grid(shape, loc, opts)` | An axes spanning cells, as matplotlib's `subplot2grid`: `[rows, cols]`, the top left cell `[row, col]` (0-based), `#{rowspan:, colspan:}` |
+| `fig legend(opts)`, `Plot figlegend(opts)` | One legend for all the axes (each label once). `loc`: the corners, sides and centre of the figure, or `"outside right"`, `"outside left"`, `"outside upper center"`, `"outside lower center"` (and `"outside right upper"` / `"outside right lower"`), beside the axes, which make room for it. Also `ncol`, `title`, `fontsize`. |
 | `Plot gcf`, `Plot gca`, `Plot sca(ax)` | The current figure and axes; make an axes current |
 | `fig axes`, `fig ax(row, col)` | All the figure's axes; the one at a grid position |
 | `suptitle(s, opts)` | A title above all the subplots |
@@ -154,9 +163,9 @@ axis labels, title and colour bar need, and subplots in one column or row line u
 ### Format strings
 
 A format string is any of a colour, a marker and a line style, in any order: `"r"`, `"o"`
-(markers only), `"g^-"`, `"k--"`, `"b.:"`.
+(markers only), `"g^-"`, `"k--"`, `"b.:"`, `"C1--"`.
 
-- Colours: `b` `g` `r` `c` `m` `y` `k` `w`
+- Colours: `b` `g` `r` `c` `m` `y` `k` `w`, and `C0` to `C9`, the colour cycle's
 - Markers: `.` `,` `o` `s` `^` `v` `<` `>` `D` `d` `p` `h` `*` `+` `x` `|` `_`
 - Lines: `-` solid, `--` dashed, `:` dotted, `-.` dash-dot (and `"none"` as a `linestyle`)
 
@@ -219,6 +228,39 @@ ax legend                                                  // lists both axes' l
 ```
 
 ![Box plots, violins, contours and twin axes](docs/images/statistics.png)
+
+## Layout and math text
+
+Shared axes, a mosaic of axes spanning cells, legends beside the axes or in columns, and math
+in any text, from [`examples/layout.clay`](examples/layout.clay):
+
+```clay norun
+[fig, axs] = Plot subplots(2, 2, #{sharex: "col", sharey: "row"})
+axs at(0) at(0) plot(epochs, loss, #{label: "$\\eta = 10^{-1}$"})
+axs at(0) at(0) ylabel("loss $\\mathcal{L}$")
+fig suptitle("Learning rate $\\eta$: loss $\\mathcal{L} = -\\sum_i y_i \\log \\hat{y}_i$")
+fig legend(#{loc: "outside right", title: "learning rate"})
+```
+
+![Shared axes, math text and a figure legend](docs/images/layout_shared.png)
+
+```clay norun
+[fig, m] = Plot subplotMosaic(["AAD", "BCD"])     // A over two columns, D over two rows
+m get("A") legend(#{ncol: 3})
+ax legend(#{bboxToAnchor: [1.02, 1], loc: "upper left"})   // beside the axes
+```
+
+![A mosaic of axes](docs/images/layout_mosaic.png)
+
+Text between `$` signs is math, as in matplotlib: `^` raises and `_` lowers the next character
+or `{group}`, and they nest (`$e^{-x^2}$`); `\alpha` to `\omega` and `\Gamma` to `\Omega` are
+Greek letters; `\pm \times \cdot \leq \geq \neq \approx \infty \partial \nabla \sum \prod
+\int \sqrt{x} \rightarrow \in \propto \ldots` and others are symbols; `\sin`, `\log`,
+`\exp`, `\max` and their kind are written upright; `\frac{a}{b}` reads a/b; font commands
+(`\mathrm`, `\mathcal`, `\mathbf`, `\text`...) and accents (`\hat`, `\bar`, `\tilde`) show
+their letters as they are; and `-` is a minus sign. It works in every text: titles, labels,
+tick labels, legends, annotations. `\$` is a dollar sign, and a lone `$` is just text. In Clay
+strings a backslash is written `\\`, so `"$\\sigma^2$"` is matplotlib's `r"$\sigma^2$"`.
 
 ## Dates and densities
 
@@ -438,6 +480,9 @@ images they enlarge, so a small image (a 28 x 28 `imshow`) is enlarged into bloc
 
 ## Limitations
 
+- Math text is a subset of matplotlib's: no stacked fractions, roots or matrices, and one font.
+  PNG and SVG lack a few symbols (≠ ≈ ∂ ∇ √ ∫ → and others), drawn as `!=`, `~`, `d`...; PDF
+  draws them, and Greek, in its Symbol font.
 - Text is DejaVu Sans only (Helvetica in PDF), in one weight (`fontweight` applies to SVG and PDF alone). SVG asks the
   viewer for DejaVu Sans and the layout measures text with it; a viewer without the font uses
   another sans-serif, which may sit a little closer or further than intended.
@@ -466,6 +511,7 @@ clay examples/dashboard.clay
 clay examples/statistics.clay
 clay examples/dates_density.clay
 clay examples/animation.clay
+clay examples/layout.clay
 ```
 
 `examples/fashion_mnist.clay` also needs clay-ann; its header says how to run it.

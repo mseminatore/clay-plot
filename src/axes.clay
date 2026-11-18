@@ -7,7 +7,7 @@
 PlotAxes = Object clone {
     figure = nil
     artists = nil
-    cell = nil              // [rows, cols, row, col] in the figure's grid
+    cell = nil              // [rows, cols, row, col, rowSpan, colSpan] in the figure's grid
     titleText = nil
     titleOpts = nil
     xlabelText = nil
@@ -32,6 +32,10 @@ PlotAxes = Object clone {
     host = nil              // twinx / twiny: the axes this one shares a box with
     twinKind = nil          // "x": shares host's x axis (own y on the right); "y": shares y
     twins = nil             // the twins made from this axes
+    xGroup = nil            // sharex / sharey: the axes sharing this one's x (or y),
+    yGroup = nil            // itself included; nil when not shared
+    hideXTicks = false      // shared axes: inner tick labels left out
+    hideYTicks = false
     xDates = false          // x holds dates: days since the day xOrigin
     xOrigin = nil           // (days since 1970) of the first date plotted
     // worked out while drawing
@@ -49,7 +53,8 @@ PlotAxes = Object clone {
         self figure = fig
         self artists = []
         self twins = []
-        self cell = where ?? [1, 1, 0, 0]
+        w = where ?? [1, 1, 0, 0]
+        self cell = (w size == 4) ifTrue { w + [1, 1] } ifFalse { w }
         self gridOn = Plot rc get("axes.grid") ?? false
     }
 
@@ -927,7 +932,8 @@ PlotAxes = Object clone {
         (twinKind == "x") ifTrue { return host xlim(lo, hi) }
         ((lo == nil) && (hi == nil)) ifTrue { v = _view; return [_untx(v at(0), xLog), _untx(v at(1), xLog)] }
         (lo type == "Array") ifTrue { hi = lo at(1); lo = lo at(0) }
-        self xlimits = [_dx1(lo), _dx1(hi)]
+        lims = [_dx1(lo), _dx1(hi)]
+        (xGroup ?? [self]) each { |a| a xlimits = lims }
         self
     }
 
@@ -935,7 +941,8 @@ PlotAxes = Object clone {
         (twinKind == "y") ifTrue { return host ylim(lo, hi) }
         ((lo == nil) && (hi == nil)) ifTrue { v = _view; return [_untx(v at(2), yLog), _untx(v at(3), yLog)] }
         (lo type == "Array") ifTrue { hi = lo at(1); lo = lo at(0) }
-        self ylimits = [lo, hi]
+        lims = [lo, hi]
+        (yGroup ?? [self]) each { |a| a ylimits = lims }
         self
     }
 
@@ -1021,12 +1028,14 @@ PlotAxes = Object clone {
     // xscale("log") or xscale("linear"); yscale likewise
     xscale(kind) {
         (twinKind == "x") ifTrue { host xscale(kind); return self }
-        self xLog = _scale(kind)
+        log = _scale(kind)
+        (xGroup ?? [self]) each { |a| a xLog = log }
         self
     }
     yscale(kind) {
         (twinKind == "y") ifTrue { host yscale(kind); return self }
-        self yLog = _scale(kind)
+        log = _scale(kind)
+        (yGroup ?? [self]) each { |a| a yLog = log }
         self
     }
 
@@ -1075,9 +1084,9 @@ PlotAxes = Object clone {
         bottom = 0
         axisVisible ifTrue {
             ywid = yt get("labels") reduce(0) { |m, s| Math max(m, _tickWidth(cv, s, fs)) }
-            left = tl + pad + ywid
+            left = tl + (hideYTicks ifTrue { 0 } ifFalse { pad + ywid })
             (ylabelText != nil) ifTrue { left = left + (_pt(_rc("axes.labelsize")) * 1.2) + _pt(4) }
-            bottom = tl + pad + _xLabelHeight(cv, fs)
+            bottom = tl + (hideXTicks ifTrue { 0 } ifFalse { pad + _xLabelHeight(cv, fs) })
             ((xlabelText != nil) || ((xt get("offset") ?? "") != "")) ifTrue { bottom = bottom + (_pt(_rc("axes.labelsize")) * 1.25) + _pt(4) }
             labs = xt get("labels")
             ((labs size > 0) && (xt get("rotation") == 0)) ifTrue { right = _tickWidth(cv, labs last, fs) / 2 }
@@ -1093,7 +1102,9 @@ PlotAxes = Object clone {
         }
         ta = _titleAxes
         (ta != nil) ifTrue { top = _twinTop(cv) + (ta _titleSize * 1.25) + _pt(6) }
-        [left, top, right, bottom]
+        // a legend anchored outside the axes
+        room = _legendRoom(cv, w, h)
+        [left + room at(0), Math max(top, room at(1)), Math max(right, room at(2)), bottom + room at(3)]
     }
 
     // The room a twin's own axis takes beside the plot box, in pixels
@@ -2030,69 +2041,148 @@ PlotAxes = Object clone {
         entries = _legendEntries
         (entries size == 0) ifTrue { return nil }
         o = legendOpts
+        lay = _legendLayout(cv, entries, o)
+        pos = _legendAt(lay, o)
+        _legendBox(cv, lay, pos at(0), pos at(1), o)
+    }
+
+    // Where the legend's top left goes: anchored by bboxToAnchor (axes
+    // fractions, which may be outside 0..1: the legend's loc corner goes
+    // there), or at loc inside the axes ("best" finds the emptiest corner)
+    _legendAt(lay, o) {
+        w = lay get("w")
+        h = lay get("h")
+        anchor = o get("bboxToAnchor") ?? o get("bbox_to_anchor")
+        (anchor != nil) ifTrue {
+            b = plotBox
+            ax = b at(0) + (anchor at(0) * b at(2))
+            ay = (b at(1) + b at(3)) - (anchor at(1) * b at(3))
+            return _cornerAt(o get("loc") ?? "upper left", ax, ay, w, h)
+        }
+        inset = lay get("fs") * 0.5
+        loc = o get("loc") ?? "best"
+        (loc == "best") ifTrue { loc = _bestLoc(w, h, inset) }
+        _legendPos(loc, w, h, inset)
+    }
+
+    // The top left of a w x h box whose loc corner (or side, or centre) is at x, y
+    _cornerAt(loc, x, y, w, h) {
+        lx = x
+        ly = y
+        (loc contains("right")) ifTrue { lx = x - w }
+        ((loc == "center") || (loc == "upper center") || (loc == "lower center")) ifTrue { lx = x - (w / 2) }
+        (loc contains("lower")) ifTrue { ly = y - h }
+        ((loc == "center") || (loc == "center left") || (loc == "center right") || (loc == "right")) ifTrue { ly = y - (h / 2) }
+        [lx, ly]
+    }
+
+    // The room a legend anchored outside the axes takes beside them, as
+    // [left, top, right, bottom] for a plot box about w x h
+    _legendRoom(cv, w, h) {
+        none = [0, 0, 0, 0]
+        ((legendOpts == nil) || ((legendOpts get("bboxToAnchor") ?? legendOpts get("bbox_to_anchor")) == nil)) ifTrue { return none }
+        entries = _legendEntries
+        (entries size == 0) ifTrue { return none }
+        lay = _legendLayout(cv, entries, legendOpts)
+        anchor = legendOpts get("bboxToAnchor") ?? legendOpts get("bbox_to_anchor")
+        p = _cornerAt(legendOpts get("loc") ?? "upper left", anchor at(0) * w, (1 - anchor at(1)) * h, lay get("w"), lay get("h"))
+        gap = lay get("fs") * 0.5
+        lx = p at(0)
+        ly = p at(1)
+        [Math max(0, 0 - lx) + ((lx < 0) ifTrue { gap } ifFalse { 0 }),
+         Math max(0, 0 - ly),
+         Math max(0, (lx + lay get("w")) - w) + (((lx + lay get("w")) > w) ifTrue { gap } ifFalse { 0 }),
+         Math max(0, (ly + lay get("h")) - h)]
+    }
+
+    // A legend's size and arrangement: entries in ncol columns (filled
+    // down each column in turn), with an optional title
+    _legendLayout(cv, entries, o) {
         fs = _pt(o get("fontsize") ?? _rc("legend.fontsize"))
         pad = fs * 0.4
         handle = fs * 2.0
         gap = fs * 0.8
         rowH = fs * 1.5
-        heading = o get("title")
-        widest = entries reduce(0) { |m, a| Math max(m, cv measure(a get("label") toString, fs)) }
-        (heading != nil) ifTrue { widest = Math max(widest, cv measure(heading, fs) - handle - gap) }
-        w = (pad * 2) + handle + gap + widest
-        h = (pad * 2) + (entries size * rowH) - (fs * 0.5)
-        (heading != nil) ifTrue { h = h + rowH }
-        b = plotBox
-        inset = fs * 0.5
-        loc = o get("loc") ?? "best"
-        (loc == "best") ifTrue { loc = _bestLoc(w, h, inset) }
-        pos = _legendPos(loc, w, h, inset)
-        lx = pos at(0)
-        ly = pos at(1)
-        cv rect(lx, ly, w, h, #{fill: "#ffffff", stroke: "#cccccc", width: _pt(0.8), alpha: o get("framealpha") ?? 0.8})
-        y = ly + pad + (fs * 0.5)
-        (heading != nil) ifTrue {
-            cv text(lx + (w / 2), y, heading, #{size: fs, anchor: "middle", valign: "center"})
-            y = y + rowH
+        colSp = fs * 2.0
+        ncol = Math max(1, Math min(o get("ncol") ?? o get("ncols") ?? 1, entries size))
+        nrows = (entries size + ncol - 1) / ncol
+        widths = (0..(ncol - 1)) map { |c|
+            col = entries slice(c * nrows, Math min((c + 1) * nrows, entries size))
+            handle + gap + (col reduce(0) { |m, a| Math max(m, cv measure(a get("label") toString, fs)) })
         }
-        entries each { |a|
-            hx = lx + pad
-            k = a get("kind")
-            color = PlotColor hex(a get("color") ?? "#000000")
-            (k == "line" || k == "hline" || k == "vline" || k == "contour") ifTrue {
-                ls = a get("linestyle") ?? "-"
-                lw = _pt(a get("linewidth") ?? _rc("lines.linewidth"))
-                ((ls != "none") && (ls != "")) ifTrue {
-                    cv line(hx, y, hx + handle, y, #{stroke: color, width: lw, dash: _dash(ls, lw), alpha: a get("alpha")})
-                }
-                m = a get("marker")
-                ((m != nil) && (m != "none")) ifTrue {
-                    face = _hexOrNil(a get("markerfacecolor")) ?? color
-                    _marker(cv, m, hx + (handle / 2), y, _pt(a get("markersize") ?? _rc("lines.markersize")), face, _hexOrNil(a get("markeredgecolor")) ?? face, a get("alpha"))
-                }
+        heading = o get("title")
+        inner = widths sum + (colSp * (ncol - 1))
+        (heading != nil) ifTrue { inner = Math max(inner, cv measure(heading, fs)) }
+        h = (pad * 2) + (nrows * rowH) - (fs * 0.5)
+        (heading != nil) ifTrue { h = h + rowH }
+        #{entries: entries, fs: fs, pad: pad, handle: handle, gap: gap, rowH: rowH, colSp: colSp,
+          ncol: ncol, nrows: nrows, widths: widths, heading: heading, w: (pad * 2) + inner, h: h}
+    }
+
+    // Draw a laid-out legend with its top left at lx, ly
+    _legendBox(cv, lay, lx, ly, o) {
+        fs = lay get("fs")
+        pad = lay get("pad")
+        w = lay get("w")
+        (o get("frameon") != false) ifTrue {
+            cv rect(lx, ly, w, lay get("h"), #{fill: "#ffffff", stroke: "#cccccc", width: _pt(0.8), alpha: o get("framealpha") ?? 0.8})
+        }
+        top = ly + pad + (fs * 0.5)
+        heading = lay get("heading")
+        (heading != nil) ifTrue {
+            cv text(lx + (w / 2), top, heading, #{size: fs, anchor: "middle", valign: "center"})
+            top = top + lay get("rowH")
+        }
+        entries = lay get("entries")
+        nrows = lay get("nrows")
+        x = lx + pad
+        lay get("ncol") times { |c|
+            y = top
+            (entries slice(c * nrows, Math min((c + 1) * nrows, entries size))) each { |a|
+                _legendHandle(cv, a, x, y, fs, lay get("handle"))
+                cv text(x + lay get("handle") + lay get("gap"), y, a get("label") toString, #{size: fs, valign: "center"})
+                y = y + lay get("rowH")
             }
-            (k == "scatter") ifTrue {
-                c = a get("color") ?? PlotColor lut(a get("cmap")) at(128)
-                s = a get("sizes")
-                (s type == "Array") ifTrue { s = Math pow(_rc("lines.markersize"), 2) }
-                _marker(cv, a get("marker"), hx + (handle / 2), y, _pt(Math sqrt(s)), c, a get("edgecolor") ?? c, a get("alpha"))
+            x = x + (lay get("widths") at(c)) + lay get("colSp")
+        }
+    }
+
+    // An artist's legend handle, handle wide, centred on y
+    _legendHandle(cv, a, hx, y, fs, handle) {
+        k = a get("kind")
+        color = PlotColor hex(a get("color") ?? "#000000")
+        (k == "line" || k == "hline" || k == "vline" || k == "contour") ifTrue {
+            ls = a get("linestyle") ?? "-"
+            lw = _pt(a get("linewidth") ?? _rc("lines.linewidth"))
+            ((ls != "none") && (ls != "")) ifTrue {
+                cv line(hx, y, hx + handle, y, #{stroke: color, width: lw, dash: _dash(ls, lw), alpha: a get("alpha")})
             }
-            (k == "boxes") ifTrue {
-                cv rect(hx, y - (fs * 0.35), handle, fs * 0.7, #{fill: a get("color"), stroke: a get("box") get("color"), width: _pt(1)})
+            m = a get("marker")
+            ((m != nil) && (m != "none")) ifTrue {
+                face = _hexOrNil(a get("markerfacecolor")) ?? color
+                _marker(cv, m, hx + (handle / 2), y, _pt(a get("markersize") ?? _rc("lines.markersize")), face, _hexOrNil(a get("markeredgecolor")) ?? face, a get("alpha"))
             }
-            (k == "violin") ifTrue {
-                fill = (a get("colors") != nil) ifTrue { a get("colors") first } ifFalse { a get("color") }
-                cv rect(hx, y - (fs * 0.35), handle, fs * 0.7, #{fill: fill, alpha: a get("alpha")})
-            }
-            (k == "contourf" || k == "span") ifTrue {
-                cv rect(hx, y - (fs * 0.35), handle, fs * 0.7, #{fill: a get("color"), alpha: a get("alpha"),
-                                                                 stroke: a get("edgecolor"), width: _pt(1)})
-            }
-            (k == "bars" || k == "fill" || k == "wedge") ifTrue {
-                fill = (a get("colors") != nil) ifTrue { a get("colors") first } ifFalse { a get("color") }
-                cv rect(hx, y - (fs * 0.35), handle, fs * 0.7, #{fill: fill, alpha: a get("alpha"), stroke: a get("edgecolor"), width: _pt(1)})
-            }
-            cv text(hx + handle + gap, y, a get("label") toString, #{size: fs, valign: "center"})
-            y = y + rowH
+        }
+        (k == "scatter") ifTrue {
+            c = a get("color") ?? PlotColor lut(a get("cmap")) at(128)
+            s = a get("sizes")
+            (s type == "Array") ifTrue { s = Math pow(_rc("lines.markersize"), 2) }
+            _marker(cv, a get("marker"), hx + (handle / 2), y, _pt(Math sqrt(s)), c, a get("edgecolor") ?? c, a get("alpha"))
+        }
+        (k == "boxes") ifTrue {
+            cv rect(hx, y - (fs * 0.35), handle, fs * 0.7, #{fill: a get("color"), stroke: a get("box") get("color"), width: _pt(1)})
+        }
+        (k == "violin") ifTrue {
+            fill = (a get("colors") != nil) ifTrue { a get("colors") first } ifFalse { a get("color") }
+            cv rect(hx, y - (fs * 0.35), handle, fs * 0.7, #{fill: fill, alpha: a get("alpha")})
+        }
+        (k == "contourf" || k == "span") ifTrue {
+            cv rect(hx, y - (fs * 0.35), handle, fs * 0.7, #{fill: a get("color"), alpha: a get("alpha"),
+                                                             stroke: a get("edgecolor"), width: _pt(1)})
+        }
+        (k == "bars" || k == "fill" || k == "wedge") ifTrue {
+            fill = (a get("colors") != nil) ifTrue { a get("colors") first } ifFalse { a get("color") }
+            cv rect(hx, y - (fs * 0.35), handle, fs * 0.7, #{fill: fill, alpha: a get("alpha"), stroke: a get("edgecolor"), width: _pt(1)})
         }
     }
 
@@ -2297,6 +2387,24 @@ PlotAxes = Object clone {
     // The range shown: [x0, x1, y0, y1], from the data with a 5% margin
     // (none for images), or the limits set with xlim / ylim
     _view() {
+        v = _ownView
+        (xGroup != nil) ifTrue {
+            xGroup each { |a| (a != self) ifTrue {
+                o = a _ownView
+                v = [Math min(v at(0), o at(0)), Math max(v at(1), o at(1)), v at(2), v at(3)]
+            } }
+        }
+        (yGroup != nil) ifTrue {
+            yGroup each { |a| (a != self) ifTrue {
+                o = a _ownView
+                v = [v at(0), v at(1), Math min(v at(2), o at(2)), Math max(v at(3), o at(3))]
+            } }
+        }
+        v
+    }
+
+    // The range this axes' own data and limits ask for
+    _ownView() {
         lim = [nil, nil, nil, nil]
         stickyX = []
         stickyY = []
@@ -2451,6 +2559,8 @@ PlotAxes = Object clone {
             _axisTicks(cv, xtickSpec, v at(0), v at(1), w, true, integerX, xLog)
         }
         self yt = _axisTicks(cv, ytickSpec, v at(2), v at(3), h, false, integerY, yLog)
+        hideXTicks ifTrue { xt set("labels", xt get("labels") map { |s| "" }); xt set("offset", "") }
+        hideYTicks ifTrue { yt set("labels", yt get("labels") map { |s| "" }) }
     }
 
     // Date ticks, as many as fit side by side: #{values:, labels:, rotation:, offset:}
@@ -2470,7 +2580,11 @@ PlotAxes = Object clone {
     }
 
     // The axes whose x axis the dates belong to (a twinx's host)
-    _dateAxes() { (twinKind == "x") ifTrue { host } ifFalse { self } }
+    _dateAxes() {
+        (twinKind == "x") ifTrue { return host _dateAxes }
+        (xGroup != nil) ifTrue { return xGroup first }
+        self
+    }
 
     // Values for the x axis: dates (Date objects, or text such as
     // "2024-03-15") become days since the axes' first date; numbers stay
@@ -2707,12 +2821,18 @@ PlotAxes = Object clone {
                 res set("linestyle", two)
                 step = 2
             } ifFalse {
+                // "C0".."C9": the colour cycle's colours, as matplotlib's
+                ((ch == "C") && (i + 1 < fmt length) && ("0123456789" contains(fmt at(i + 1)))) ifTrue {
+                    res set("color", two)
+                    step = 2
+                } ifFalse {
                 ("bgrcmykw" contains(ch)) ifTrue { res set("color", ch) } ifFalse {
                     (".,o^v<>sDdph*+x|_" contains(ch)) ifTrue { res set("marker", ch) } ifFalse {
                         (ch == "-" || ch == ":") ifTrue { res set("linestyle", ch) } ifFalse {
-                            raise("Plot: can't read format string \"" + fmt + "\" (colour b g r c m y k w, marker . o s ^ v < > D d p h * + x, line - -- -. :)")
+                            raise("Plot: can't read format string \"" + fmt + "\" (colour b g r c m y k w or C0 to C9, marker . o s ^ v < > D d p h * + x, line - -- -. :)")
                         }
                     }
+                }
                 }
             }
             i = i + step

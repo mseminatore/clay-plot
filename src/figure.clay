@@ -16,6 +16,7 @@ PlotFigure = Object clone {
     facecolor = "#ffffff"
     axesList = nil
     suptitleText = nil
+    legendOpts = nil        // fig legend: a legend of all the axes' labelled artists
     suptitleSize = nil
 
     init(opts = nil) {
@@ -34,8 +35,14 @@ PlotFigure = Object clone {
 
     // Replace the axes with a rows x cols grid. Returns them as matplotlib
     // does: one Axes for 1 x 1, an Array for a single row or column, else an
-    // Array of rows. fig axes is always the flat list.
-    subplots(rows = 1, cols = 1) {
+    // Array of rows. fig axes is always the flat list. opts: sharex, sharey
+    // (true or "all": every axes; "col": each column; "row": each row): the
+    // shared axes show one range and scale, and inner tick labels are left
+    // out (x but the bottom row's, sharing columns; y but the first
+    // column's, sharing rows)
+    subplots(rows = 1, cols = 1, opts = nil) {
+        (rows type == "Dict") ifTrue { opts = rows; rows = 1 }
+        (cols type == "Dict") ifTrue { opts = cols; cols = 1 }
         self axesList = []
         grid = []
         rows times { |r|
@@ -46,6 +53,10 @@ PlotFigure = Object clone {
                 row append(ax)
             }
             grid append(row)
+        }
+        (opts != nil) ifTrue {
+            _share(grid, opts get("sharex"), true)
+            _share(grid, opts get("sharey"), false)
         }
         ((rows == 1) && (cols == 1)) ifTrue { return grid first first }
         (rows == 1) ifTrue { return grid first }
@@ -59,12 +70,118 @@ PlotFigure = Object clone {
         (index < 1 || index > rows * cols) ifTrue { raise("Plot: subplot index " + index toString + " is outside a " + rows toString + " x " + cols toString + " grid") }
         r = (index - 1) / cols
         c = (index - 1) % cols
-        where = [rows, cols, r, c]
+        where = [rows, cols, r, c, 1, 1]
         found = axesList find { |ax| ax cell == where }
         (found != nil) ifTrue { return found }
         ax = PlotAxes new(self, where)
         axesList append(ax)
         ax
+    }
+
+    // Group the grid's axes to share x (or y): how is true or "all", "col",
+    // "row", or false / nil / "none"
+    _share(grid, how, isX) {
+        ((how == nil) || (how == false) || (how == "none")) ifTrue { return nil }
+        all = (how == true) || (how == "all")
+        ((all || (how == "col") || (how == "row")) not) ifTrue {
+            raise("Plot: share" + (isX ifTrue { "x" } ifFalse { "y" }) + " is true, \"all\", \"col\", \"row\" or false")
+        }
+        rows = grid size
+        cols = grid first size
+        groups = all ifTrue { [grid flatten] } ifFalse {
+            (how == "col") ifTrue { (0..(cols - 1)) map { |c| grid map { |row| row at(c) } } } ifFalse { grid }
+        }
+        groups each { |g| g each { |a| isX ifTrue { a xGroup = g } ifFalse { a yGroup = g } } }
+        // inner tick labels: x but the bottom row's when columns share; y but the first column's when rows share
+        (isX && (all || (how == "col"))) ifTrue {
+            (rows - 1) times { |r| grid at(r) each { |a| a hideXTicks = true } }
+        }
+        ((isX not) && (all || (how == "row"))) ifTrue {
+            grid each { |row| (cols - 1) times { |c| row at(c + 1) hideYTicks = true } }
+        }
+    }
+
+    // The axes for a layout of names, as matplotlib's subplot_mosaic: one
+    // String per row (a character a cell) or Arrays of names; a name over
+    // several cells (a rectangle) is one axes spanning them; "." is empty.
+    // Returns a Dict of the axes by name.
+    subplotMosaic(layout) {
+        rows = layout map { |r| (r type == "String") ifTrue { (0..(r length - 1)) map { |i| r at(i) } } ifFalse { r } }
+        nr = rows size
+        nc = rows first size
+        ((rows find { |r| r size != nc }) != nil) ifTrue { raise("Plot: subplotMosaic: every row needs the same number of cells") }
+        names = []
+        nr times { |r| nc times { |c|
+            n = rows at(r) at(c) toString
+            ((n != ".") && (names indexOf(n) == nil || names indexOf(n) < 0)) ifTrue { names append(n) }
+        } }
+        self axesList = []
+        out = Dict clone
+        names each { |n|
+            r0 = nr
+            c0 = nc
+            r1 = -1
+            c1 = -1
+            nr times { |r| nc times { |c|
+                (rows at(r) at(c) toString == n) ifTrue {
+                    r0 = Math min(r0, r); c0 = Math min(c0, c)
+                    r1 = Math max(r1, r); c1 = Math max(c1, c)
+                }
+            } }
+            ((r0..r1) toArray) each { |r| ((c0..c1) toArray) each { |c|
+                (rows at(r) at(c) toString != n) ifTrue { raise("Plot: subplotMosaic: \"" + n + "\" must fill a rectangle") }
+            } }
+            ax = PlotAxes new(self, [nr, nc, r0, c0, (r1 - r0) + 1, (c1 - c0) + 1])
+            axesList append(ax)
+            out set(n, ax)
+        }
+        out
+    }
+
+    // An axes over rowspan x colspan cells of a rows x cols grid, from the
+    // cell at [row, col] (0-based), as matplotlib's subplot2grid
+    addSubplotGrid(shape, loc, rowspan = 1, colspan = 1) {
+        (rowspan type == "Dict") ifTrue { colspan = rowspan get("colspan") ?? 1; rowspan = rowspan get("rowspan") ?? 1 }
+        rows = shape at(0)
+        cols = shape at(1)
+        r = loc at(0)
+        c = loc at(1)
+        ((r < 0) || (c < 0) || (r + rowspan > rows) || (c + colspan > cols)) ifTrue {
+            raise("Plot: subplot2grid: cells " + loc toString + " spanning " + rowspan toString + " x " + colspan toString + " go outside a " + rows toString + " x " + cols toString + " grid")
+        }
+        where = [rows, cols, r, c, rowspan, colspan]
+        found = axesList find { |ax| ax cell == where }
+        (found != nil) ifTrue { return found }
+        ax = PlotAxes new(self, where)
+        axesList append(ax)
+        ax
+    }
+
+    // A legend of every axes' labelled artists (a label once), for the
+    // whole figure: legend(#{loc:, ncol:, title:, fontsize:, framealpha:}).
+    // loc: "upper right" (the default) and the other corners, sides and
+    // "center", inside the figure; or "outside right", "outside left",
+    // "outside upper center" or "outside lower center" (also "outside
+    // right upper" / "outside right lower"), beside the axes, which make
+    // room for it
+    legend(opts = nil) {
+        self legendOpts = opts ?? #{}
+        self
+    }
+
+    // All the axes' legend entries, each label once
+    _legendEntries() {
+        out = []
+        seen = Dict clone
+        axesList each { |ax|
+            (ax host == nil) ifTrue {
+                ax _legendEntries each { |a|
+                    k = a get("label") toString
+                    (seen get(k) == nil) ifTrue { seen set(k, true); out append(a) }
+                }
+            }
+        }
+        out
     }
 
     // All the axes, in the order they were made
@@ -82,7 +199,7 @@ PlotFigure = Object clone {
     }
 
     // Remove all axes
-    clear() { self axesList = []; self suptitleText = nil; self }
+    clear() { self axesList = []; self suptitleText = nil; self legendOpts = nil; self }
 
     // Save to a file; the extension picks the format: .png, .svg or .pdf.
     // opts: dpi (pixels per inch for this file; the figure's own by default;
@@ -236,12 +353,51 @@ PlotFigure = Object clone {
         areaY = top
         areaW = w - (pad * 2)
         areaH = h - top - pad
-        // each axes' cell and the margins it asks for
+        // a figure legend outside the axes takes its room first
+        flay = nil
+        floc = nil
+        fpos = nil
+        (legendOpts != nil) ifTrue {
+            entries = _legendEntries
+            (entries size > 0) ifTrue {
+                flay = primary first _legendLayout(cv, entries, legendOpts)
+                floc = legendOpts get("loc") ?? "upper right"
+                lw = flay get("w")
+                lh = flay get("h")
+                gap = 6 * pt
+                (floc startsWith("outside ")) ifTrue {
+                    side = floc slice(8, floc length)
+                    ((side startsWith("right")) || (side == "center right")) ifTrue {
+                        areaW = areaW - lw - gap
+                        y0 = (side contains("upper")) ifTrue { areaY } ifFalse {
+                            (side contains("lower")) ifTrue { (areaY + areaH) - lh } ifFalse { areaY + ((areaH - lh) / 2) }
+                        }
+                        fpos = [areaX + areaW + gap, y0]
+                    }
+                    ((side startsWith("left")) || (side == "center left")) ifTrue {
+                        fpos = [areaX, areaY + ((areaH - lh) / 2)]
+                        areaX = areaX + lw + gap
+                        areaW = areaW - lw - gap
+                    }
+                    ((side == "upper center") || (side == "upper") || (side == "top")) ifTrue {
+                        fpos = [(w - lw) / 2, areaY]
+                        areaY = areaY + lh + gap
+                        areaH = areaH - lh - gap
+                    }
+                    ((side == "lower center") || (side == "lower") || (side == "bottom")) ifTrue {
+                        areaH = areaH - lh - gap
+                        fpos = [(w - lw) / 2, areaY + areaH + gap]
+                    }
+                    (fpos == nil) ifTrue { raise("Plot: figure legend loc \"" + floc + "\": use \"outside right\", \"outside left\", \"outside upper center\" or \"outside lower center\"") }
+                }
+            }
+        }
+        // each axes' cells (a span of grid cells) and the margins it asks for
         cells = primary map { |ax|
             g = ax cell
             cw = areaW / g at(1)
             ch = areaH / g at(0)
-            [areaX + (g at(3) * cw), areaY + (g at(2) * ch), cw, ch]
+            [areaX + (g at(3) * cw), areaY + (g at(2) * ch), cw * g at(5), ch * g at(4)]
         }
         gapX = 10 * pt
         gapY = 10 * pt
@@ -261,14 +417,11 @@ PlotFigure = Object clone {
             primary size times { |j|
                 gj = primary at(j) cell
                 ((gj at(0) == gi at(0)) && (gj at(1) == gi at(1))) ifTrue {
-                    (gj at(3) == gi at(3)) ifTrue {
-                        l = Math max(l, margins at(j) at(0))
-                        r = Math max(r, margins at(j) at(2))
-                    }
-                    (gj at(2) == gi at(2)) ifTrue {
-                        t = Math max(t, margins at(j) at(1))
-                        b = Math max(b, margins at(j) at(3))
-                    }
+                    // axes starting (or ending) in the same column line up their left (right)
+                    (gj at(3) == gi at(3)) ifTrue { l = Math max(l, margins at(j) at(0)) }
+                    ((gj at(3) + gj at(5)) == (gi at(3) + gi at(5))) ifTrue { r = Math max(r, margins at(j) at(2)) }
+                    (gj at(2) == gi at(2)) ifTrue { t = Math max(t, margins at(j) at(1)) }
+                    ((gj at(2) + gj at(4)) == (gi at(2) + gi at(4))) ifTrue { b = Math max(b, margins at(j) at(3)) }
                 }
             }
             c = cells at(i)
@@ -279,6 +432,24 @@ PlotFigure = Object clone {
             primary at(i) _place(cv, box)
         }
         primary each { |ax| ax draw(cv) }
+        (flay != nil) ifTrue {
+            (fpos == nil) ifTrue {
+                // inside the figure: a corner, side or the centre of the area the axes fill
+                inset = 4 * pt
+                lw = flay get("w")
+                lh = flay get("h")
+                ax0 = areaX + inset
+                ax1 = (areaX + areaW) - inset
+                ay0 = areaY + inset
+                ay1 = (areaY + areaH) - inset
+                px = (floc contains("left")) ifTrue { ax0 } ifFalse { (floc contains("right")) ifTrue { ax1 } ifFalse { (ax0 + ax1) / 2 } }
+                py = (floc contains("upper")) ifTrue { ay0 } ifFalse { (floc contains("lower")) ifTrue { ay1 } ifFalse { (ay0 + ay1) / 2 } }
+                corner = floc
+                (floc == "right") ifTrue { corner = "center right" }
+                fpos = primary first _cornerAt(corner, px, py, lw, lh)
+            }
+            primary first _legendBox(cv, flay, fpos at(0), fpos at(1), legendOpts)
+        }
         cv
     }
 

@@ -95,11 +95,23 @@ PlotPdf = Object clone {
         _end(st)
     }
 
+    // Text, with math ("$\\sigma^2$") laid out by PlotMath, and Greek letters
+    // and math symbols drawn in the Symbol font (Helvetica has none)
     text(x, y, s, style) {
+        ((PlotMath has(s)) || (_needsSymbol(s))) ifTrue { return PlotMath draw(self, x, y, s, style) }
+        _plainText(x, y, s, style)
+    }
+
+    measure(s, size) {
+        ((PlotMath has(s)) || (_needsSymbol(s))) ifTrue { return PlotMath width(self, s, size) }
+        _plainMeasure(s, size)
+    }
+
+    _plainText(x, y, s, style) {
         (s == nil) ifTrue { return nil }
         st = style ?? #{}
         size = st get("size") ?? 12
-        font = (st get("weight") == "bold") ifTrue { "Helvetica-Bold" } ifFalse { "Helvetica" }
+        font = st get("font") ?? ((st get("weight") == "bold") ifTrue { "Helvetica-Bold" } ifFalse { "Helvetica" })
         _begin(st)
         color = st get("color") ?? "#000000"
         (color != _fillNow) ifTrue { page fillColor(color); self _fillNow = color }
@@ -134,9 +146,89 @@ PlotPdf = Object clone {
         self _clear
     }
 
-    measure(s, size) {
+    _plainMeasure(s, size, font = nil) {
         (s == nil) ifTrue { return 0 }
-        Pdf textWidth(_text(s), "Helvetica", size)
+        Pdf textWidth(_text(s), font ?? "Helvetica", size)
+    }
+
+    // Does s have characters only the Symbol font has
+    _needsSymbol(s) {
+        (s == nil) ifTrue { return false }
+        t = s toString
+        // every such character is 2 or 3 bytes of UTF-8, starting at 0xCE or above
+        ((t bytes find { |b| b >= 206 }) == nil) ifTrue { return false }
+        (_symbolChars keys find { |k| t contains(k) }) != nil
+    }
+
+    // PlotMath's runs split where the font changes: [text, scale, rise, font]
+    _fontRuns(runs) {
+        out = []
+        map = _symbolChars
+        runs each { |r|
+            t = r at(0)
+            cur = ""
+            curSym = false
+            flush = {
+                (cur != "") ifTrue { out append([cur, r at(1), r at(2), curSym ifTrue { "Symbol" } ifFalse { nil }]) }
+                cur = ""
+            }
+            chars = _chars(t)
+            chars each { |c|
+                sym = map get(c)
+                isSym = sym != nil
+                (isSym != curSym) ifTrue { flush value; curSym = isSym }
+                cur = cur + (isSym ifTrue { sym } ifFalse { c })
+            }
+            flush value
+        }
+        out
+    }
+
+    // A String's characters (UTF-8 sequences), one String each
+    _chars(t) {
+        out = []
+        b = t bytes
+        i = 0
+        { i < b size } whileTrue {
+            n = (b at(i) >= 240) ifTrue { 4 } ifFalse { (b at(i) >= 224) ifTrue { 3 } ifFalse { (b at(i) >= 192) ifTrue { 2 } ifFalse { 1 } } }
+            out append(String fromBytes(b slice(i, Math min(i + n, b size))))
+            i = i + n
+        }
+        out
+    }
+
+    // Unicode -> the Symbol font's character for it (written as the
+    // Windows-1252 character with the same byte, as clay-pdf encodes text)
+    _symbolChars() {
+        (_symbolMap == nil) ifTrue {
+            m = Dict clone
+            lower = "αβχδεφγηιϕκλμνοπθρστυϖωξψζ"
+            latin = "abcdefghijklmnopqrstuvwxyz"
+            upper = "ΑΒΧΔΕΦΓΗΙϑΚΛΜΝΟΠΘΡΣΤΥςΩΞΨΖ"
+            lc = _chars(lower)
+            uc = _chars(upper)
+            26 times { |i|
+                m set(lc at(i), latin at(i))
+                m set(uc at(i), latin at(i) upper)
+            }
+            // byte values in the Symbol encoding
+            [["≠", 185], ["≡", 186], ["≈", 187], ["∞", 165], ["≤", 163], ["≥", 179], ["±", 177],
+             ["÷", 184], ["∂", 182], ["∝", 181], ["√", 214], ["∇", 209], ["∑", 229], ["∏", 213],
+             ["∫", 242], ["→", 174], ["←", 172], ["↑", 173], ["↓", 175], ["↔", 171], ["⇒", 222],
+             ["∈", 206], ["∀", 34], ["∃", 36], ["∼", 126], ["′", 162], ["⟨", 225], ["⟩", 241],
+             ["∗", 42], ["∓", 177], ["×", 180]] each { |pair|
+                m set(pair at(0), String fromBytes(PlotPdf _utf8(pair at(1))))
+            }
+            self _symbolMap = m
+        }
+        _symbolMap
+    }
+    _symbolMap = nil
+
+    // The UTF-8 bytes of a code point below 2048
+    _utf8(cp) {
+        (cp < 128) ifTrue { return [cp] }
+        [192 + (cp / 64), 128 + (cp % 64)]
     }
 
     // ---- internal -----------------------------------------------------------

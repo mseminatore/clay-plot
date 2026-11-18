@@ -69,7 +69,19 @@ PlotPng = Object clone {
         }
     }
 
+    // Text, with math ("$\\sigma^2$") laid out by PlotMath
     text(x, y, s, style) {
+        (PlotMath has(s)) ifTrue { return PlotMath draw(self, x, y, s, style) }
+        _plainText(x, y, s, style)
+    }
+
+    // The width of text, math included
+    measure(s, size) {
+        (PlotMath has(s)) ifTrue { return PlotMath width(self, s, size) }
+        _plainMeasure(s, size)
+    }
+
+    _plainText(x, y, s, style) {
         size = style get("size") ?? 12
         rot = style get("rotate") ?? 0
         dy = PlotSvg _baselineShift(style get("valign"), size)
@@ -89,7 +101,7 @@ PlotPng = Object clone {
     clip(x, y, w, h) { canvas clip(x, y, w, h) }
     unclip() { canvas unclip }
 
-    measure(s, size) {
+    _plainMeasure(s, size) {
         (s == nil) ifTrue { return 0 }
         canvas textWidth(s toString, size)
     }

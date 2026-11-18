@@ -1,0 +1,56 @@
+// Layout and math text: shared axes, a mosaic of spanning axes, legends
+// outside the axes and in columns, and $...$ math in labels. Writes
+// examples/out/layout_shared.png and layout_mosaic.png (and .svg).
+// Run from the brick's directory: clay examples/layout.clay
+import("plot")
+
+out = "examples/out"
+(File isDir(out)) ifFalse { File mkdir(out) }
+
+// training runs at three learning rates: loss and accuracy per epoch
+epochs = (1..40) toArray
+rates = [0.1, 0.01, 0.001]
+loss = rates map { |r| epochs map { |e| (2.0 * Math exp(0 - ((e * r * 40) / (1 + (r * 100))))) + 0.1 } }
+acc = rates map { |r| epochs map { |e| 0.95 - (0.6 * Math exp(0 - ((e * r * 30) / (1 + (r * 80))))) } }
+
+// 1. a 2 x 2 grid sharing x down each column and y along each row, one
+// legend for the figure, beside the axes
+[fig, axs] = Plot subplots(2, 2, #{figsize: [9, 6], sharex: "col", sharey: "row"})
+3 times { |k|
+    label = "$\\eta = 10^{" + (0 - (k + 1)) toString + "}$"
+    axs at(0) at(0) plot(epochs, loss at(k), #{label: label})
+    axs at(0) at(1) semilogx(epochs, loss at(k), #{label: label})
+    axs at(1) at(0) plot(epochs, acc at(k), #{label: label})
+    axs at(1) at(1) semilogx(epochs, acc at(k), #{label: label})
+}
+axs at(0) at(0) ylabel("loss $\\mathcal{L}$")
+axs at(1) at(0) ylabel("accuracy")
+axs at(1) at(0) xlabel("epoch")
+axs at(1) at(1) xlabel("epoch (log scale)")
+axs at(0) at(0) title("linear")
+axs at(0) at(1) title("logarithmic")
+fig suptitle("Learning rate $\\eta$: loss $\\mathcal{L} = -\\sum_i y_i \\log \\hat{y}_i$")
+fig legend(#{loc: "outside right", title: "learning rate"})
+fig savefig(out + "/layout_shared.png")
+fig savefig(out + "/layout_shared.svg")
+
+// 2. a mosaic: a wide axes over two narrow ones, and a tall one beside them
+Plot close
+[fig2, m] = Plot subplotMosaic(["AAD", "BCD"], #{figsize: [9, 5.5]})
+xs = (0..80) map { |i| i / 10.0 }
+a = m get("A")
+[0.5, 1, 2] each { |s| a plot(xs, xs map { |x| Math exp(0 - ((x - 4) * (x - 4)) / (2 * s * s)) / s }, #{label: "$\\sigma = " + s toString + "$"}) }
+a legend(#{ncol: 3, loc: "upper right"})
+a title("$\\frac{1}{\\sigma} e^{-(x - \\mu)^2 / 2\\sigma^2}$, $\\mu = 4$")
+b = m get("B")
+b hist((0..400) map { |i| Math sin(i * 1.7) + Math cos(i * 0.37) }, 20)
+b title("$x_i$, $i = 1 \\ldots 400$")
+c = m get("C")
+c plot(xs, xs map { |x| x * x }, "C2")
+c title("$y = x^2$")
+d = m get("D")
+d barh(["$\\alpha$", "$\\beta$", "$\\gamma$", "$\\delta$"], [4, 7, 3, 5], #{color: "C4"})
+d title("Greek labels")
+fig2 savefig(out + "/layout_mosaic.png")
+fig2 savefig(out + "/layout_mosaic.svg")
+"wrote examples/out/layout_shared.png and layout_mosaic.png" println
