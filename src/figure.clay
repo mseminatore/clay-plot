@@ -412,11 +412,47 @@ PlotFigure = Object clone {
         }
         gapX = 10 * pt
         gapY = 10 * pt
+        // The margins come from the tick labels, and the ticks from the axis
+        // lengths, which the margins decide: first from a guess (80% of the
+        // cell), then again from the boxes that gives (a short axis can get
+        // more ticks than the guess did, with wider labels: 1.0, 1.5 ... for 1, 2, 3)
+        guess = cells map { |c| [0, 0, c at(2) * 0.8, c at(3) * 0.8] }
+        boxes = self _layoutBoxes(cv, primary, cells, guess, gapX, gapY)
+        boxes = self _layoutBoxes(cv, primary, cells, boxes, gapX, gapY)
+        primary size times { |i| primary at(i) _place(cv, boxes at(i)) }
+        primary each { |ax| ax draw(cv) }
+        (flay != nil) ifTrue {
+            (fpos == nil) ifTrue {
+                // inside the figure: a corner, side or the centre of the area the axes fill
+                inset = 4 * pt
+                lw = flay get("w")
+                lh = flay get("h")
+                ax0 = areaX + inset
+                ax1 = (areaX + areaW) - inset
+                ay0 = areaY + inset
+                ay1 = (areaY + areaH) - inset
+                px = (floc contains("left")) ifTrue { ax0 } ifFalse { (floc contains("right")) ifTrue { ax1 } ifFalse { (ax0 + ax1) / 2 } }
+                py = (floc contains("upper")) ifTrue { ay0 } ifFalse { (floc contains("lower")) ifTrue { ay1 } ifFalse { (ay0 + ay1) / 2 } }
+                corner = floc
+                (floc == "right") ifTrue { corner = "center right" }
+                fpos = primary first _cornerAt(corner, px, py, lw, lh)
+            }
+            primary first _legendBox(cv, flay, fpos at(0), fpos at(1), legendOpts)
+        }
+        cv
+    }
+
+    // The plot box of each axes: its cell less the margins its ticks,
+    // labels and title ask for, given axis lengths of about the width and
+    // height of sizes (boxes); axes sharing a grid column (row) line up
+    // their sides
+    _layoutBoxes(cv, primary, cells, sizes, gapX, gapY) {
         margins = []
         primary size times { |i|
-            c = cells at(i)
-            margins append(primary at(i) _margins(cv, c at(2) * 0.8, c at(3) * 0.8))
+            sz = sizes at(i)
+            margins append(primary at(i) _margins(cv, Math max(sz at(2), 10), Math max(sz at(3), 10)))
         }
+        boxes = []
         // line up axes that share a grid column (left, right) or row (top, bottom)
         primary size times { |i|
             gi = primary at(i) cell
@@ -440,28 +476,9 @@ PlotFigure = Object clone {
             sepY = (gi at(0) > 1) ifTrue { gapY / 2 } ifFalse { 0 }
             box = [c at(0) + l + sepX, c at(1) + t + sepY,
                    c at(2) - l - r - (sepX * 2), c at(3) - t - b - (sepY * 2)]
-            primary at(i) _place(cv, box)
+            boxes append(box)
         }
-        primary each { |ax| ax draw(cv) }
-        (flay != nil) ifTrue {
-            (fpos == nil) ifTrue {
-                // inside the figure: a corner, side or the centre of the area the axes fill
-                inset = 4 * pt
-                lw = flay get("w")
-                lh = flay get("h")
-                ax0 = areaX + inset
-                ax1 = (areaX + areaW) - inset
-                ay0 = areaY + inset
-                ay1 = (areaY + areaH) - inset
-                px = (floc contains("left")) ifTrue { ax0 } ifFalse { (floc contains("right")) ifTrue { ax1 } ifFalse { (ax0 + ax1) / 2 } }
-                py = (floc contains("upper")) ifTrue { ay0 } ifFalse { (floc contains("lower")) ifTrue { ay1 } ifFalse { (ay0 + ay1) / 2 } }
-                corner = floc
-                (floc == "right") ifTrue { corner = "center right" }
-                fpos = primary first _cornerAt(corner, px, py, lw, lh)
-            }
-            primary first _legendBox(cv, flay, fpos at(0), fpos at(1), legendOpts)
-        }
-        cv
+        boxes
     }
 
     toString() {

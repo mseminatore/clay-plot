@@ -927,6 +927,20 @@ Test describe("Twin axes") {
 }
 
 Test describe("PlotFigure") {
+    Test it("leaves room for the tick labels of a small figure") {
+        // its short axis gets more ticks (1.0, 1.5 ...) than a first guess at
+        // the margins gave it (1, 2, 3), so the margins are worked out again
+        Plot close
+        fig = Plot figure(#{figsize: [4, 2]})
+        Plot plot([1, 3, 2])
+        fig toSvg
+        ax = fig axesList first
+        fs = ax _pt(Plot rc get("xtick.labelsize"))
+        widest = (ax yt get("labels")) reduce(0) { |m, s| Math max(m, PlotSvg measure(s, fs)) }
+        Test assertEqual(ax yt get("labels") first, "1.0")
+        Test assertTrue((ax plotBox at(0)) >= (ax _pt(6 + 3.5 + 3.5)) + widest)
+        Plot close
+    }
     Test it("returns subplots as matplotlib does") {
         [fig, ax] = Plot subplots
         Test assertEqual(ax type, "PlotAxes")
