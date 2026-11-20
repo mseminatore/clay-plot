@@ -449,7 +449,7 @@ PlotML = Object clone {
     pca(data, k = 2, opts = nil) {
         (k type == "Dict") ifTrue { opts = k; k = 2 }
         o = opts ?? #{}
-        (data hasMethod("pca")) ifTrue { return data pca(k) }
+        (data hasMethod("pca")) ifTrue { return data pca(k, o get("maxRows")) }
         rows = (data type == "Array") ifTrue { data } ifFalse { data toArray }
         n = rows size
         (n < 2) ifTrue { raise("Plot: pca needs at least 2 rows") }
@@ -593,7 +593,8 @@ PlotML = Object clone {
 
     // A figure of one histogram per layer of weights: layers is a Dict (name
     // -> numbers, or rows of them), an Array of those, or a network with
-    // weights(i) and layerCount (as clay-ann's may offer). Each title gives
+    // weights(i) and layerCount (as clay-ann's; layers without weights are
+    // left out, and titles name a layer by its index and kind). Each title gives
     // the mean and standard deviation. opts: bins (40), cols (up to 4),
     // range ([lo, hi] for every layer, to compare frames of an animation),
     // color, figsize, title. Returns the figure.
@@ -632,10 +633,13 @@ PlotML = Object clone {
             return (0..(layers size - 1)) map { |i| ["layer " + (i + 1) toString, flat value(layers at(i))] }
         }
         ((layers hasMethod("weights")) && (layers hasMethod("layerCount"))) ifTrue {
+            kinds = (layers hasMethod("layers")) ifTrue { (layers layers) map { |l| l get("kind") } } ifFalse { nil }
             out = []
             layers layerCount times { |i|
                 w = layers weights(i)
-                (w != nil) ifTrue { out append(["layer " + (i + 1) toString, flat value(w)]) }
+                name = "layer " + i toString
+                (kinds != nil) ifTrue { name = i toString + " " + (kinds at(i)) toString }
+                (w != nil) ifTrue { out append([name, flat value(w)]) }
             }
             return out
         }
