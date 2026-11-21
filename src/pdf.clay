@@ -178,6 +178,8 @@ PlotPdf = Object clone {
             chars = _chars(t)
             chars each { |c|
                 sym = map get(c)
+                // neither Helvetica nor Symbol has it: as near as plain text gets
+                (sym == nil) ifTrue { c = _plainFallbacks get(c) ?? c }
                 isSym = sym != nil
                 (isSym != curSym) ifTrue { flush value; curSym = isSym }
                 cur = cur + (isSym ifTrue { sym } ifFalse { c })
@@ -219,7 +221,10 @@ PlotPdf = Object clone {
              ["÷", 184], ["∂", 182], ["∝", 181], ["√", 214], ["∇", 209], ["∑", 229], ["∏", 213],
              ["∫", 242], ["→", 174], ["←", 172], ["↑", 173], ["↓", 175], ["↔", 171], ["⇒", 222],
              ["∈", 206], ["∀", 34], ["∃", 36], ["∼", 126], ["′", 162], ["⟨", 225], ["⟩", 241],
-             ["∗", 42], ["∓", 177], ["×", 180]] each { |pair|
+             ["∗", 42], ["∓", 177], ["×", 180], ["∉", 207], ["⊂", 204], ["⊃", 201], ["⊆", 205],
+             ["⊇", 202], ["∪", 200], ["∩", 199], ["∅", 198], ["∠", 208], ["⋅", 215], ["∧", 217],
+             ["∨", 218], ["⊕", 197], ["⊗", 196], ["⇐", 220], ["⇔", 219], ["⊥", 94], ["△", 68],
+             ["∄", 36]] each { |pair|
                 m set(pair at(0), String fromBytes(PlotPdf _utf8(pair at(1))))
             }
             self _symbolMap = m
@@ -227,6 +232,18 @@ PlotPdf = Object clone {
         _symbolMap
     }
     _symbolMap = nil
+
+    // Math characters in neither Helvetica (Windows-1252) nor Symbol, and the
+    // text PDF draws for them
+    _plainFallbacks() {
+        (_plainMap == nil) ifTrue {
+            self _plainMap = #{"ℝ": "R", "ℕ": "N", "ℤ": "Z", "ℚ": "Q", "ℂ": "C", "≪": "<<", "≫": ">>",
+                               "↦": "|->", "∥": "||", "∘": "°", "⋆": "*", "ħ": "h", "ℓ": "l", "⋯": "…",
+                               "≜": "=", "≝": "=", "∖": "\\"}
+        }
+        _plainMap
+    }
+    _plainMap = nil
 
     // The UTF-8 bytes of a code point below 2048
     _utf8(cp) {

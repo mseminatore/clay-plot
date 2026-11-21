@@ -1,6 +1,6 @@
 // Layout and math text: shared axes, a mosaic of spanning axes, legends
 // outside the axes and in columns, and $...$ math in labels. Writes
-// examples/out/layout_shared.png and layout_mosaic.png (and .svg).
+// examples/out/layout_shared.png, layout_mosaic.png and math_symbols.png (and .svg).
 // Run from the brick's directory: clay examples/layout.clay
 import("plot")
 
@@ -53,4 +53,18 @@ d barh(["$\\alpha$", "$\\beta$", "$\\gamma$", "$\\delta$"], [4, 7, 3, 5], #{colo
 d title("Greek labels")
 fig2 savefig(out + "/layout_mosaic.png")
 fig2 savefig(out + "/layout_mosaic.svg")
-"wrote examples/out/layout_shared.png and layout_mosaic.png" println
+
+// math symbols, one line of each kind
+fig3 = Plot figure(#{figsize: [7, 3.2]})
+ax = Plot gca
+ax axis("off")
+lines = ["$a \\neq b,\\ x \\approx y,\\ p \\equiv q,\\ \\alpha \\propto \\beta,\\ a \\ll b \\gg c,\\ \\pm\\ \\mp$",
+         "$\\sum_{i=1}^{n} x_i,\\ \\prod_k p_k,\\ \\int_0^1 f(x)\\,dx,\\ \\sqrt{2},\\ \\partial L / \\partial w,\\ \\nabla f$",
+         "$x \\in \\mathbb{R},\\ n \\in \\mathbb{N},\\ A \\cup B,\\ A \\cap B,\\ A \\subseteq B,\\ \\emptyset,\\ y \\notin S$",
+         "$p \\Rightarrow q,\\ p \\Leftrightarrow q,\\ x \\mapsto x^2,\\ \\forall x\\ \\exists y,\\ \\neg p \\land q \\lor r$",
+         "$\\langle u, v \\rangle,\\ \\hbar,\\ \\ell,\\ a \\perp b,\\ a \\parallel b,\\ 30^\\circ,\\ \\oplus\\ \\otimes,\\ \\infty$"]
+i = 0
+lines each { |l| ax text(0.0, 0.9 - (i * 0.2), l, #{fontsize: 13}); i = i + 1 }
+fig3 savefig(out + "/math_symbols.png")
+fig3 savefig(out + "/math_symbols.svg")
+"wrote examples/out/layout_shared.png, layout_mosaic.png and math_symbols.png" println

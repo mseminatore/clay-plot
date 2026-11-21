@@ -440,7 +440,14 @@ Test describe("Math text") {
         Test assertEqual((PlotMath runs("$\\hat{y}$")) first first, "y")
         Test assertEqual((PlotMath runs("$\\frac{a}{b}$")) first first, "a/b")
         Test assertEqual((PlotMath runs("$\\nosuch$")) first first, "\\nosuch")    // shows the mistake
-        Test assertEqual(PlotMath forFont("a ≠ b"), "a != b")                  // PNG and SVG's font lacks ≠
+        Test assertEqual((PlotMath runs("$a \\neq b \\Rightarrow x \\in \\mathbb{R}$")) first first, "a ≠ b ⇒ x ∈ ℝ")
+        Test assertEqual((PlotMath runs("$A \\cup B \\subseteq \\emptyset$")) first first, "A ∪ B ⊆ ∅")
+        Test assertEqual((PlotMath runs("$\\mathbb{1}$")) first first, "1")         // not a number set: as written
+        Test assertEqual((PlotMath runs("$30^\\circ$")) at(1) first, "∘")
+        // PNG and SVG draw every symbol in the bundled font; PDF in Symbol, or as text
+        runs2 = PlotPdf _fontRuns([["≠ ℝ ⊂", 1, 0]])
+        Test assertEqual(runs2 map { |r| r at(3) }, ["Symbol", nil, "Symbol"])
+        Test assertEqual((runs2 at(1)) first, " R ")
     }
     Test it("draws math in every backend") {
         Plot close

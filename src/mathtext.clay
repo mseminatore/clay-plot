@@ -6,9 +6,11 @@
 // Text between a pair of $ signs is math: ^ raises and _ lowers the next
 // character or {group} (they nest: $e^{-x^2}$), \alpha and the other Greek
 // letters and common symbols (\pm \times \cdot \leq \geq \neq \approx
-// \infty \partial \nabla \sum \sqrt \rightarrow ...) are their characters,
-// and - is a minus sign. \mathrm{...}, \text{...} and \frac{a}{b} (as a/b)
-// work too. Outside math, \$ is a dollar sign; a lone $ is just text.
+// \infty \partial \nabla \sum \int \sqrt \rightarrow \Rightarrow \in
+// \subset \cup \forall \exists ...) are their characters, and - is a minus
+// sign. \mathrm{...}, \text{...}, \mathbb{R} (ℝ; also N, Z, Q, C) and
+// \frac{a}{b} (as a/b) work too. Outside math, \$ is a dollar sign; a lone $
+// is just text.
 //
 // The backends' text and measure come here when a text has math: it is
 // broken into runs (text, size, raise), laid out along the baseline, and
@@ -132,9 +134,16 @@ PlotMath = Object clone {
     _expand(name, m, next, scale, rise, out) {
         sym = _symbols get(name)
         (sym != nil) ifTrue { _add(out, sym, scale, rise); return next }
+        // blackboard bold: the number sets
+        (name == "mathbb") ifTrue {
+            [arg, after] = _argument(m, next)
+            bb = #{R: "ℝ", N: "ℕ", Z: "ℤ", Q: "ℚ", C: "ℂ"} get(arg)
+            (bb != nil) ifTrue { _add(out, bb, scale, rise) } ifFalse { _math(arg, scale, rise, out) }
+            return after
+        }
         // font changes: one font here, so their content as it is
         (([("mathrm"), "text", "mathit", "mathbf", "mathsf", "mathtt", "rm", "operatorname",
-           "mathcal", "mathbb", "mathfrak", "mathscr", "boldsymbol", "bm"] find { |s| s == name }) != nil) ifTrue {
+           "mathcal", "mathfrak", "mathscr", "boldsymbol", "bm"] find { |s| s == name }) != nil) ifTrue {
             [arg, after] = _argument(m, next)
             _math(arg, scale, rise, out)
             return after
@@ -214,8 +223,8 @@ PlotMath = Object clone {
     _laidOut(cv, s) {
         rs = runs(s)
         (cv hasMethod("_fontRuns")) ifTrue { return cv _fontRuns(rs) }
-        // PNG and SVG: the bundled font's characters (fallbacks for the rest)
-        rs map { |r| [forFont(r at(0)), r at(1), r at(2), nil] }
+        // PNG and SVG: the bundled font has every character the symbols use
+        rs map { |r| [r at(0), r at(1), r at(2), nil] }
     }
 
     _runWidth(cv, r, size) {
@@ -303,38 +312,23 @@ PlotMath = Object clone {
                 upsilon: "υ", phi: "φ", varphi: "φ", chi: "χ", psi: "ψ", omega: "ω",
                 Gamma: "Γ", Delta: "Δ", Theta: "Θ", Lambda: "Λ", Xi: "Ξ", Pi: "Π", Sigma: "Σ",
                 Upsilon: "Υ", Phi: "Φ", Psi: "Ψ", Omega: "Ω",
-                pm: "±", mp: "∓", times: "×", div: "÷", cdot: "·", circ: "°", degree: "°",
+                pm: "±", mp: "∓", times: "×", div: "÷", cdot: "·", circ: "∘", degree: "°",
                 leq: "≤", le: "≤", geq: "≥", ge: "≥", neq: "≠", ne: "≠", approx: "≈", sim: "∼",
                 equiv: "≡", infty: "∞", partial: "∂", nabla: "∇", sum: "∑", prod: "∏", int: "∫",
                 rightarrow: "→", to: "→", leftarrow: "←", uparrow: "↑", downarrow: "↓",
                 Rightarrow: "⇒", leftrightarrow: "↔", in: "∈", forall: "∀", exists: "∃",
                 propto: "∝", ldots: "…", cdots: "⋯", prime: "′", hbar: "ħ", ell: "ℓ",
-                langle: "⟨", rangle: "⟩", lvert: "|", rvert: "|", vert: "|", star: "⋆", ast: "∗"
+                langle: "⟨", rangle: "⟩", lvert: "|", rvert: "|", vert: "|", star: "⋆", ast: "∗",
+                notin: "∉", subset: "⊂", supset: "⊃", subseteq: "⊆", supseteq: "⊇", cup: "∪", cap: "∩",
+                emptyset: "∅", varnothing: "∅", setminus: "∖", Leftarrow: "⇐", Leftrightarrow: "⇔",
+                iff: "⇔", implies: "⇒", gets: "←", mapsto: "↦", ll: "≪", gg: "≫", parallel: "∥",
+                perp: "⊥", neg: "¬", lnot: "¬", land: "∧", wedge: "∧", lor: "∨", vee: "∨",
+                oplus: "⊕", otimes: "⊗", angle: "∠", triangle: "△", triangleq: "≜", dagger: "†",
+                ddagger: "‡", bullet: "•", surd: "√", nexists: "∄"
             }
         }
         _table
     }
     _table = nil
 
-    // Characters the bundled font (a subset of DejaVu Sans) lacks, and what
-    // PNG and SVG draw instead
-    fallbacks() {
-        (_fallbacks == nil) ifTrue {
-            self _fallbacks = #{
-                "∓": "-+", "÷": "/", "≠": "!=", "≈": "~", "∼": "~", "≡": "=", "∂": "d", "∇": "grad ",
-                "∑": "Σ", "∏": "Π", "∫": "S", "→": "->", "←": "<-", "↑": "^", "↓": "v", "⇒": "=>",
-                "↔": "<->", "∈": "in ", "∀": "all ", "∃": "exists ", "∝": "~", "⋯": "…", "′": "'",
-                "ħ": "h", "ℓ": "l", "⟨": "<", "⟩": ">", "⋆": "*", "∗": "*", "√": "sqrt "
-            }
-        }
-        _fallbacks
-    }
-    _fallbacks = nil
-
-    // t with the characters the bundled font lacks replaced
-    forFont(t) {
-        out = t
-        fallbacks each { |k, v| (out contains(k)) ifTrue { out = out replace(k, v) } }
-        out
-    }
 }

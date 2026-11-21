@@ -114,8 +114,8 @@ Colormaps: `viridis` (the default), `plasma`, `inferno`, `magma`, `cividis`, `gr
 - Polar axes start their radius at 0 and have no log radius or twin axes; `quiver` points
   arrows by their data units.
 - Math text is a subset of TeX: no stacked fractions, roots or matrices, and one font.
-  PNG and SVG lack a few symbols (≠ ≈ ∂ ∇ √ ∫ → and others), drawn as `!=`, `~`, `d`...; PDF
-  draws them, and Greek, in its Symbol font.
+  PDF draws Greek and most symbols in its Symbol font, and the few it lacks (ℝ ℕ ℤ ≪ ≫ ↦ ∥ ħ ℓ)
+  as near as plain text gets (`R`, `<<`...).
 - Text is DejaVu Sans only (Helvetica in PDF), in one weight (`fontweight` applies to SVG and PDF alone). SVG asks the
   viewer for DejaVu Sans and the layout measures text with it; a viewer without the font uses
   another sans-serif, which may sit a little closer or further than intended.

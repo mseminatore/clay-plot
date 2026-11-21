@@ -84,13 +84,19 @@ ax legend(#{bboxToAnchor: [1.02, 1], loc: "upper left"})   // beside the axes
 
 Text between `$` signs is math, in TeX's notation: `^` raises and `_` lowers the next character
 or `{group}`, and they nest (`$e^{-x^2}$`); `\alpha` to `\omega` and `\Gamma` to `\Omega` are
-Greek letters; `\pm \times \cdot \leq \geq \neq \approx \infty \partial \nabla \sum \prod
-\int \sqrt{x} \rightarrow \in \propto \ldots` and others are symbols; `\sin`, `\log`,
-`\exp`, `\max` and their kind are written upright; `\frac{a}{b}` reads a/b; font commands
-(`\mathrm`, `\mathcal`, `\mathbf`, `\text`...) and accents (`\hat`, `\bar`, `\tilde`) show
-their letters as they are; and `-` is a minus sign. It works in every text: titles, labels,
-tick labels, legends, annotations. `\$` is a dollar sign, and a lone `$` is just text. In Clay
-strings a backslash is written `\\`, so `"$\\sigma^2$"` gives σ².
+Greek letters; operators and relations (`\pm \times \cdot \neq \approx \equiv \leq \ll
+\propto \perp \parallel`), big operators (`\sum \prod \int \sqrt{x}`), calculus (`\partial
+\nabla \infty`), arrows (`\rightarrow \Rightarrow \Leftrightarrow \mapsto`), sets (`\in
+\notin \subset \subseteq \cup \cap \emptyset`, `\mathbb{R}` and N, Z, Q, C), logic
+(`\forall \exists \neg \land \lor`) and others (`\langle \rangle \hbar \ell \oplus \otimes
+\circ \ldots`) are their symbols; `\sin`, `\log`, `\exp`, `\max` and their kind are written
+upright; `\frac{a}{b}` reads a/b; font commands (`\mathrm`, `\mathcal`, `\mathbf`,
+`\text`...) and accents (`\hat`, `\bar`, `\tilde`) show their letters as they are; and `-` is
+a minus sign. It works in every text: titles, labels, tick labels, legends, annotations. `\$`
+is a dollar sign, and a lone `$` is just text. In Clay strings a backslash is written `\\`, so
+`"$\\sigma^2$"` gives σ².
+
+![Math symbols](images/math_symbols.png)
 
 ## Fields and polar axes
 
