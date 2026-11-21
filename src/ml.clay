@@ -746,6 +746,71 @@ PlotML = Object clone {
         fig
     }
 
+    // A layer's feature maps for one input, one image per channel, in a new
+    // figure: from a network with activations(rows, layer) and layers (as
+    // clay-ann's), the layer counted as in its layers (negative: from the
+    // end). The input comes first, as an image of the input layer's shape.
+    // opts: max (channels shown, 32), cols (one row up to 10, else 8), cmap ("viridis";
+    // the input is "gray"), input (false leaves it out), shared (true: one
+    // colour range for every map), size, title, and imageGrid's others.
+    // Returns the figure.
+    featureMaps(net, image, layer, opts) {
+        ((net hasMethod("activations")) && (net hasMethod("layers"))) ifFalse {
+            raise("Plot: featureMaps needs a network with activations(rows, layer) and layers")
+        }
+        info = net layers
+        idx = (layer < 0) ifTrue { info size + layer } ifFalse { layer }
+        ((idx < 0) || (idx >= info size)) ifTrue { raise("Plot: featureMaps: no layer " + layer toString) }
+        row = _flat(image)
+        shape = info at(idx) get("shape")
+        c = shape at(0)
+        h = shape at(1)
+        w = shape at(2)
+        // a dense layer, [nodes, 1, 1]: its nodes as one strip
+        ((h == 1) && (w == 1)) ifTrue { w = c; c = 1 }
+        vals = (net activations([row], idx)) first
+        shown = Math min(c, opts get("max") ?? 32)
+        maps = (0..(shown - 1)) map { |k|
+            base = k * h * w
+            (0..(h - 1)) map { |r| vals slice(base + (r * w), base + ((r + 1) * w)) }
+        }
+        titles = (0..(shown - 1)) map { |k| k toString }
+        lo = nil
+        hi = nil
+        (opts get("shared") == true) ifTrue {
+            all = maps flatten
+            lo = all min
+            hi = all max
+        }
+        kind = info at(idx) get("kind") ?? "layer"
+        cmap = opts get("cmap") ?? "viridis"
+        withInput = opts get("input") != false
+        images = maps
+        (withInput) ifTrue {
+            ins = info first get("shape")
+            ih = ins at(1)
+            iw = ins at(2)
+            ((ih == 1) && (iw == 1)) ifTrue { iw = ins at(0) }
+            pic = (0..(ih - 1)) map { |r| row slice(r * iw, (r + 1) * iw) }
+            images = [pic] + maps
+            titles = ["input"] + titles
+        }
+        g = #{cols: opts get("cols") ?? ((images size <= 10) ifTrue { images size } ifFalse { 8 }), titles: titles, cmap: cmap,
+              size: opts get("size") ?? 1.3,
+              title: opts get("title") ?? (kind toString + " layer " + idx toString + ": " + shown toString +
+                     ((shown < c) ifTrue { " of " + c toString } ifFalse { "" }) + " channels")}
+        fig = imageGrid(images, g)
+        // each map in its own range (or the shared one); the input in gray
+        axes = fig axes
+        images size times { |i|
+            art = axes at(i) artists first
+            isInput = withInput && (i == 0)
+            isInput ifTrue { art set("cmap", "gray") }
+            ((isInput not) && (lo != nil)) ifTrue { art set("vmin", lo); art set("vmax", hi) }
+        }
+        fig
+    }
+
     // A class number from a number, or the index of the largest entry of a
     // row of scores or one-hot targets
     argmax(v) {

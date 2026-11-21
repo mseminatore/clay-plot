@@ -232,6 +232,9 @@ Plot = Object clone {
     // Rows (embeddings, activations) in 2-D by PCA, coloured by class
     embedding(rows, labels = nil, opts = nil) { gca embedding(rows, labels, opts) }
 
+    // A new figure of a layer's feature maps for one input (PlotML featureMaps)
+    featureMaps(net, image, layer, opts = nil) { PlotML featureMaps(net, image, layer, opts ?? #{}) }
+
     // A new figure of one histogram per layer of weights (PlotML weightHistograms)
     weightHistograms(layers, opts = nil) { PlotML weightHistograms(layers, opts ?? #{}) }
 

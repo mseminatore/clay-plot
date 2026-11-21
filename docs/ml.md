@@ -19,9 +19,10 @@ trained on Fashion-MNIST with clay-ann.
 | `Plot pca(rows, k, opts)` | Principal components (`PlotML pca`): `#{projected:, components:, explained:, mean:}`. Pure Clay: quick for up to a few hundred dimensions; fitted on `maxRows` rows at most (2000), every row projected. Data with its own `pca(k, maxRows)` method is asked for it: clay-ann's `AnnData` computes it in C (all of MNIST in a few seconds), fitted on every row unless `maxRows` is given. |
 | `Plot weightHistograms(layers, opts)` | A new figure of one histogram per layer of weights, titled with their mean and standard deviation: a Dict of name to weights, an Array of them, or a network with `weights(i)` and `layerCount` (clay-ann's: one histogram per layer that has weights, titled with its index and kind, e.g. "1 dense"). `bins` (40), `cols`, `range` (the same for every layer, to compare frames of a `Plot movie`), `title`. |
 | `overlay(image, heat, opts)` | A heatmap (a saliency map, activations) of any size, scaled smoothly to the image and blended over it. `cmap` (`"inferno"`), `alpha` (0.5), `vmin`, `vmax`, `imageCmap` (`"gray"`), `colorbar`. |
+| `Plot featureMaps(net, image, layer, opts)` | A new figure of what one layer outputs for one input, an image per channel, after the input itself. `net` has `activations(rows, layer)` and `layers`, as clay-ann's (0.5 or later); `layer` counts as in `net layers`, negative from the end; a dense layer is one strip. `max` (channels shown, 32), `cols`, `cmap` (`"viridis"`), `input` (`false` leaves the input out), `shared` (`true`: one colour range for every map), `size`, `title`. |
 | `Plot imageGrid(images, opts)` | A new figure of images, one per axes: rows, flat Arrays or `Image`s. `cols` (up to 10), `shape`, `cmap` (`"gray"`), `vmin`, `vmax`, `symmetric` (`true`: one range centred on 0 for all, with `"coolwarm"`, for weights and filters), `titles`, `predicted` and `actual` (class numbers or rows of scores: titled with the prediction, and the actual class in red when wrong), `labels` (class names), `title`, `size` (inches per image). Returns the figure. |
 
-All but `imageGrid`, `pca` and `weightHistograms` are axes methods too (`ax roc(...)`). `PlotML rocCurve(scores, targets)`,
+All but `imageGrid`, `featureMaps`, `pca` and `weightHistograms` are axes methods too (`ax roc(...)`). `PlotML rocCurve(scores, targets)`,
 `PlotML prCurve(scores, targets)` and `PlotML confusion(actual, predicted)` compute without
 drawing, and `PlotML argmax(row)` is the class a row of scores picks.
 
@@ -52,6 +53,21 @@ ax overlay(image, heat)                                  // heat: e.g. occlusion
 The saliency map is occlusion: blank each 4 x 4 patch of the image and see how much the
 network's probability for its guess drops (in `examples/fashion_mnist.clay`). It needs only
 `predict`, so it works with any model.
+
+Inside a network, from [`examples/feature_maps.clay`](../examples/feature_maps.clay), a small
+convolutional network: clay-ann's `net activations(rows, layer)` gives any layer's outputs, so
+`featureMaps` shows what each filter of a conv layer responds to, and `embedding` of the last
+hidden layer shows which classes the network has learned to tell apart:
+
+```clay norun
+Plot featureMaps(net, xTest row(0), 1)                  // layer 1: 8 filters, 26 x 26 each
+codes = net activations(xTest slice(0, 1000), -2)       // the last hidden layer
+ax embedding(codes, labels, #{classNames: names})
+```
+
+![Feature maps of a conv layer](images/fashion_mnist_features.png)
+
+![The last hidden layer by PCA](images/fashion_mnist_codes.png)
 
 ```clay
 net train(points, targets)                     // two inputs per row

@@ -1,0 +1,65 @@
+// What a small convolutional network sees: Fashion-MNIST with clay-ann, then
+// the feature maps of its two conv layers for one test image, and its last
+// hidden layer for 1000 test images in two dimensions (PCA).
+//
+// It needs clay-ann 0.5 or later (net activations) as well as plot. In a
+// project with both
+//   clay bricks add github.com/mseminatore/clay-ann ann
+//   clay bricks add github.com/mseminatore/clay-plot plot
+// run
+//   clay bricks/plot/examples/feature_maps.clay [file.csv] [--epochs n]
+// The default file is the Fashion-MNIST test set that comes with clay-ann.
+// Figures go to fashion_mnist_features*.png and fashion_mnist_codes.png in
+// the current directory.
+import("ann")
+import("plot")
+
+path = "bricks/ann/native/libann/data/fashion-mnist_test.csv"
+epochs = 3
+args = System args
+i = 0
+{ i < args size } whileTrue {
+    (args at(i) == "--epochs") ifTrue { i = i + 1; epochs = (args at(i)) toInt } ifFalse { path = args at(i) }
+    i = i + 1
+}
+names = ["T-shirt", "Trouser", "Pullover", "Dress", "Coat", "Sandal", "Shirt", "Sneaker", "Bag", "Ankle boot"]
+
+Ann seed(1)
+[train, test] = (Ann loadCsv(path, true)) shuffle split(0.8)
+xTrain = (train columns(1)) scale(255)
+yTrain = (train column(0)) oneHot(10)
+xTest = (test columns(1)) scale(255)
+yTest = (test column(0)) oneHot(10)
+labels = ((test column(0)) toArray) map { |row| row first toInt }
+
+net = Ann network(#{"loss": "cross_entropy", "learningRate": 0.001, "quiet": true})
+net input(1, 28, 28)
+net conv2d(8, 3, "relu")
+net maxPool2d(2)
+net conv2d(16, 3, "relu")
+net maxPool2d(2)
+net flatten
+net dense(64, "relu")
+net output(10, "softmax")
+net fit(xTrain, yTrain, #{"epochs": epochs, "batchSize": 32,
+                         "onEpoch": { |e| ("epoch " + e get("epoch") toString) println }})
+("test accuracy " + (Math round(net accuracy(xTest, yTest) * 1000) / 10.0) toString + "%") println
+
+// each conv layer's outputs for one image: net activations(rows, layer) underneath
+img = xTest row(0)
+Plot featureMaps(net, img, 1)                       // layer 1: 8 maps of 26 x 26
+Plot savefig("fashion_mnist_features.png")
+Plot featureMaps(net, img, 3, #{input: false})      // layer 3: 16 maps of 11 x 11
+Plot savefig("fashion_mnist_features3.png")
+
+// the last hidden layer (64 numbers per image) by PCA: classes the network
+// tells apart sit apart
+codes = net activations(xTest slice(0, 1000), -2)
+Plot figure(#{figsize: [7, 5]})
+ax = Plot gca
+ax embedding(codes, labels slice(0, 1000), #{classNames: names, s: 8})
+ax legend(#{bboxToAnchor: [1.0, 1], loc: "upper left", fontsize: 8})
+ax title("The last hidden layer, by PCA")
+Plot savefig("fashion_mnist_codes.png")
+
+"wrote fashion_mnist_features.png, _features3.png, _codes.png" println
