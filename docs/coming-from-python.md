@@ -48,6 +48,7 @@ Option names that have underscores in Python are camelCase here (`bbox_to_anchor
 | `plt.fill(x, y)`, `plt.fill_betweenx(y, x1, x2)` | `Plot fill(x, y)`, `Plot fillBetweenx(y, x1, x2)` |
 | `plt.pcolormesh(X, Y, C, cmap="RdBu")` | `Plot pcolormesh(X, Y, C, #{cmap: "RdBu"})` |
 | `plt.quiver(X, Y, U, V, C)` | `Plot quiver(X, Y, U, V, C)` |
+| `plt.streamplot(x, y, U, V, color=speed, density=1.5)` | `Plot streamplot(xs, ys, U, V, #{color: speed, density: 1.5})` |
 | `ax = plt.subplot(projection="polar")`, `plt.polar(t, r)` | `ax = Plot subplot(1, 1, 1, #{projection: "polar"})`, `Plot polar(t, r)` |
 | `ax.set_theta_zero_location("N")`, `ax.set_theta_direction(-1)` | `ax setThetaZeroLocation("N")`, `ax setThetaDirection(-1)` |
 | `plt.rcParams["font.size"] = 12` | `Plot rc set("font.size", 12)` |

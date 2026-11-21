@@ -110,6 +110,17 @@ ax quiver(xs, ys, U, V, speed, #{cmap: "plasma"})
 
 ![Fills, meshes and a vector field](images/fields.png)
 
+`streamplot` draws a field's flow as lines, as matplotlib's does: they start all over the
+field, stop where they come near others (so they are about evenly spaced), and each has an
+arrow at its middle. Colour and width can follow a value, such as the speed:
+
+```clay norun
+ax streamplot(xs, ys, U, V)                                       // xs, ys: one per column, row
+ax streamplot(xs, ys, U, V, #{color: speed, cmap: "plasma", linewidth: widths, density: 1.5})
+```
+
+![Streamlines, plain and by speed](images/streamplot.png)
+
 Polar axes take angles in radians and radii. Lines and fills go straight between their points
 (they don't follow the circle), bars become wedges, and `xticks` names the spokes, which makes radar charts
 and wind roses:

@@ -34,6 +34,7 @@ import("color.clay")
 import("ticks.clay")
 import("stats.clay")
 import("contour.clay")
+import("stream.clay")
 import("dates.clay")
 import("mathtext.clay")
 import("svg.clay")
@@ -176,6 +177,7 @@ Plot = Object clone {
     pcolormesh(a = nil, b = nil, c = nil, d = nil) { gca pcolormesh(a, b, c, d) }
     pcolor(a = nil, b = nil, c = nil, d = nil) { gca pcolor(a, b, c, d) }
     quiver(a = nil, b = nil, c = nil, d = nil, e = nil, f = nil) { gca quiver(a, b, c, d, e, f) }
+    streamplot(x, y, u, v, opts = nil) { gca streamplot(x, y, u, v, opts) }
     hist(data, bins = nil, opts = nil) { gca hist(data, bins, opts) }
     fillBetween(x, y1, y2 = nil, opts = nil) { gca fillBetween(x, y1, y2, opts) }
     axhline(y = 0, opts = nil) { gca axhline(y, opts) }

@@ -306,6 +306,47 @@ Test describe("Fills, meshes and fields") {
     }
 }
 
+Test describe("Streamplot") {
+    Test it("traces evenly spaced streamlines with arrows") {
+        Plot close
+        g = (0..20) map { |i| -2 + (i * 0.2) }
+        U = g map { |y| g map { |x| 0 - y } }                     // a rotation
+        V = g map { |y| g map { |x| x } }
+        art = Plot streamplot(g, g, U, V)
+        lines = art get("lines")
+        Test assertTrue(lines size > 5)
+        Test assertEqual((art get("arrows")) size, lines size)
+        // each line follows the rotation: its points keep their distance from the centre
+        drift = 0
+        lines each { |l|
+            r = (0..((l at(0)) size - 1)) map { |k| Math sqrt(((l at(0)) at(k) * (l at(0)) at(k)) + ((l at(1)) at(k) * (l at(1)) at(k))) }
+            drift = Math max(drift, (r max) - (r min))
+        }
+        Test assertTrue(drift < 0.1)
+        Test assertTrue((Plot toSvg) contains("<polygon"))            // the arrowheads
+        Test assertEqual(Plot gca view, [-2, 2, -2, 2])               // the grid's extent, tight
+        Plot close
+    }
+    Test it("colours by a value, starts where asked, and checks its input") {
+        Plot close
+        g = [0, 1, 2, 3]
+        U = g map { |y| g map { |x| 1 } }
+        V = g map { |y| g map { |x| 0 } }
+        C = g map { |y| g map { |x| x } }
+        art = Plot streamplot(g, g, U, V, #{color: C, startPoints: [[0, 1.5]], arrowstyle: "-"})
+        Test assertEqual((art get("lines")) size, 1)
+        line = (art get("lines")) first
+        Test assertTrue(((line at(0)) first < 0.01) && ((line at(0)) last > 2.99))   // across, left to right
+        Test assertTrue(((line at(1)) find { |y| (y - 1.5) abs > 0.001 }) == nil)
+        Test assertEqual([art get("vmin") < 0.01, art get("vmax") > 2.99], [true, true])
+        Test assertEqual(Plot colorbar, art)
+        Test assertFalse((Plot toSvg) contains("<polygon"))           // arrowstyle "-": none
+        Test assertRaises({ Plot streamplot(g, g, [[1, 2]], V) })
+        Test assertRaises({ Plot streamplot([0, 1], g, U, V) })
+        Plot close
+    }
+}
+
 Test describe("Polar axes") {
     Test it("turns angle and radius into x and y") {
         Plot close

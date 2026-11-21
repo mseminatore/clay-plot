@@ -1,7 +1,7 @@
 // Fills, meshes, vector fields and polar axes: fill and fillBetweenx,
-// pcolormesh on edges and on a curved grid, quiver, and polar plots (a
-// spiral, a radar chart, a wind rose, a scatter). Writes
-// examples/out/fields.png and polar.png (and .svg).
+// pcolormesh on edges and on a curved grid, quiver, streamplot, and polar
+// plots (a spiral, a radar chart, a wind rose, a scatter). Writes
+// examples/out/fields.png, streamplot.png and polar.png (and .svg).
 // Run from the brick's directory: clay examples/fields.clay
 import("plot")
 
@@ -53,6 +53,24 @@ fig savefig(out + "/fields.svg")
 
 Plot close
 
+// streamplot: the flow U = -1 - x^2 + y, V = 1 + x - y^2, plain and by speed
+n = 60
+sx = (0..(n - 1)) map { |i| -3 + ((6.0 * i) / (n - 1)) }
+SU = sx map { |y| sx map { |x| -1 - (x * x) + y } }
+SV = sx map { |y| sx map { |x| 1 + x - (y * y) } }
+sp = sx map { |y| sx map { |x| Math sqrt(Math pow(-1 - (x * x) + y, 2) + Math pow(1 + x - (y * y), 2)) } }
+[fig, axs] = Plot subplots(1, 2, #{figsize: [11, 5]})
+axs first streamplot(sx, sx, SU, SV)
+axs first title("streamplot")
+s = axs last streamplot(sx, sx, SU, SV, #{color: sp, cmap: "plasma", density: [0.6, 1.2],
+                                         linewidth: sp map { |r| r map { |v| 0.5 + (v / 8) } }})
+axs last colorbar(s, #{label: "speed"})
+axs last title("coloured and sized by speed")
+fig savefig(out + "/streamplot.png")
+fig savefig(out + "/streamplot.svg")
+
+Plot close
+
 [fig, axs] = Plot subplots(2, 2, #{figsize: [10, 10], projection: "polar"})
 
 // a spiral and a rose
@@ -96,4 +114,4 @@ ax setRlabelPosition(100)
 ax title("scatter, annotate")
 fig savefig(out + "/polar.png")
 fig savefig(out + "/polar.svg")
-"wrote examples/out/fields.png and polar.png" println
+"wrote examples/out/fields.png, streamplot.png and polar.png" println

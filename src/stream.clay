@@ -1,0 +1,265 @@
+// PlotStream -- the streamlines of a 2-D vector field, as matplotlib's streamplot
+//
+//   f = PlotStream field(xs, ys, U, V)          // xs: one x per column, ys: one y per row
+//   PlotStream lines(f, #{density: 1})          // [[xs, ys], ...] in data units, and arrows
+//
+// As matplotlib does it: the domain is covered by a mask of about 30 x 30
+// cells (times density). Streamlines start from the mask's free cells in a
+// spiral from the edge in, and are traced forwards and backwards (midpoint
+// steps, at a constant speed along the flow); a line stops where it reaches
+// a cell another line has been through, leaves the domain, finds no flow
+// (nil, nan or zero), or is maxlength long. Lines shorter than minlength
+// are dropped, and give their cells back. Lengths are in axes units: the
+// domain is 1 across and 1 high.
+
+PlotStream = Object clone {
+    // The field: X and Y as one Array each (evenly spaced, one per column and
+    // row; nil for 0, 1, 2 ...) or mesh grids (their first row and column),
+    // U and V as rows (U at(i) at(j) at y i, x j)
+    field(x, y, u, v) {
+        ((u type != "Array") || (u size < 2) || (u first type != "Array")) ifTrue {
+            raise("Plot: streamplot needs U and V as rows of numbers, at least 2 x 2")
+        }
+        ny = u size
+        nx = u first size
+        bad = { |m| (m type != "Array") || (m size != ny) || ((m find { |r| (r type != "Array") || (r size != nx) }) != nil) }
+        ((nx < 2) || (bad value(u)) || (bad value(v))) ifTrue {
+            raise("Plot: streamplot needs U and V as rows of numbers, the same shape, at least 2 x 2")
+        }
+        xs = _axis(x, nx, false)
+        ys = _axis(y, ny, true)
+        #{xs: xs, ys: ys, nx: nx, ny: ny, us: u flatten, vs: v flatten,
+          x0: xs first, x1: xs last, y0: ys first, y1: ys last}
+    }
+
+    // One coordinate per column (or row): given, from a mesh grid, or 0, 1, 2 ...
+    _axis(a, n, isY) {
+        (a == nil) ifTrue { return (0..(n - 1)) map { |i| i toFloat } }
+        vals = a
+        ((a type == "Array") && (a size > 0) && (a first type == "Array")) ifTrue {
+            vals = isY ifTrue { a map { |r| r first } } ifFalse { a first }
+        }
+        ((vals type != "Array") || (vals size != n)) ifTrue {
+            raise("Plot: streamplot: " + (isY ifTrue { "Y" } ifFalse { "X" }) + " needs one value per " + (isY ifTrue { "row" } ifFalse { "column" }) + " of U")
+        }
+        ((vals last) == (vals first)) ifTrue { raise("Plot: streamplot: X and Y must span a range") }
+        vals map { |v| v toFloat }
+    }
+
+    // The value of rows-flattened grid values gv at axes point (px, py), by
+    // bilinear interpolation; nil outside, or where a corner is nil or nan
+    sample(f, gv, px, py) {
+        nx = f get("nx")
+        ny = f get("ny")
+        gx = px * (nx - 1)
+        gy = py * (ny - 1)
+        ((gx < 0) || (gy < 0) || (gx > (nx - 1)) || (gy > (ny - 1))) ifTrue { return nil }
+        i = Math min(Math floor(gx) toInt, nx - 2)
+        j = Math min(Math floor(gy) toInt, ny - 2)
+        fx = gx - i
+        fy = gy - j
+        k = (j * nx) + i
+        a = gv at(k)
+        b = gv at(k + 1)
+        c = gv at(k + nx)
+        d = gv at(k + nx + 1)
+        ((a == nil) || (b == nil) || (c == nil) || (d == nil) || (a != a) || (b != b) || (c != c) || (d != d)) ifTrue { return nil }
+        ((a * (1 - fx)) + (b * fx)) * (1 - fy) + (((c * (1 - fx)) + (d * fx)) * fy)
+    }
+
+    // The flow's direction at (px, py) in axes units, a unit vector, or nil
+    _dir(f, px, py) {
+        u = sample(f, f get("us"), px, py)
+        v = sample(f, f get("vs"), px, py)
+        ((u == nil) || (v == nil)) ifTrue { return nil }
+        ax = u / ((f get("x1")) - (f get("x0")))
+        ay = v / ((f get("y1")) - (f get("y0")))
+        n = Math sqrt((ax * ax) + (ay * ay))
+        (n < 1.0e-12) ifTrue { return nil }
+        [ax / n, ay / n]
+    }
+
+    // The streamlines: #{lines: [[xs, ys], ...] (data units), arrows: [[x,
+    // y, dx, dy], ...] (a point at the middle of each line and the flow's
+    // direction there, in data units)}. opts: density (or [x, y]; 1),
+    // minlength (0.1), maxlength (4), startPoints ([[x, y], ...] in data
+    // units: start there instead), direction ("both", "forward",
+    // "backward"), broken (false: lines don't stop at others' cells)
+    lines(f, opts) {
+        o = opts ?? #{}
+        dens = o get("density") ?? 1
+        dx = (dens type == "Array") ifTrue { dens at(0) } ifFalse { dens }
+        dy = (dens type == "Array") ifTrue { dens at(1) } ifFalse { dens }
+        mnx = Math max(1, Math round(30 * dx) toInt)
+        mny = Math max(1, Math round(30 * dy) toInt)
+        st = #{f: f, mnx: mnx, mny: mny, mask: (0..((mnx * mny) - 1)) map { |i| 0 },
+               h: 0.25 / Math max(mnx, mny), maxlength: o get("maxlength") ?? 4.0,
+               broken: (o get("broken") ?? o get("brokenStreamlines")) != false}
+        minlength = o get("minlength") ?? 0.1
+        dirn = (o get("direction") ?? o get("integrationDirection") ?? "both") toString
+        ((dirn != "both") && (dirn != "forward") && (dirn != "backward")) ifTrue {
+            raise("Plot: streamplot direction is \"both\", \"forward\" or \"backward\"")
+        }
+        seeds = []
+        sp = o get("startPoints") ?? o get("start_points")
+        (sp != nil) ifTrue {
+            sp each { |p| seeds append([_toAxes(f, p at(0), true), _toAxes(f, p at(1), false), true]) }
+        } ifFalse {
+            (_spiral(mnx, mny)) each { |c| seeds append([((c at(0)) + 0.5) / mnx, ((c at(1)) + 0.5) / mny, false]) }
+        }
+        out = []
+        arrows = []
+        seeds each { |s|
+            px = s at(0)
+            py = s at(1)
+            cell = _cell(st, px, py)
+            free = (cell != nil) && (((st get("mask")) at(cell)) == 0)
+            ((cell != nil) && (free || (s at(2)))) ifTrue {
+                marks = []
+                free ifTrue { (st get("mask")) setAt(cell, 1); marks append(cell) }
+                fwd = (dirn != "backward") ifTrue { _trace(st, px, py, 1, cell, marks) } ifFalse { [[px], [py], 0] }
+                bwd = (dirn != "forward") ifTrue { _trace(st, px, py, -1, cell, marks) } ifFalse { [[px], [py], 0] }
+                total = (fwd at(2)) + (bwd at(2))
+                (total < minlength) ifTrue {
+                    marks each { |m| (st get("mask")) setAt(m, 0) }
+                } ifFalse {
+                    lxs = ((bwd at(0)) reverse) + ((fwd at(0)) slice(1, (fwd at(0)) size))
+                    lys = ((bwd at(1)) reverse) + ((fwd at(1)) slice(1, (fwd at(1)) size))
+                    dxs = lxs map { |v| (f get("x0")) + (v * ((f get("x1")) - (f get("x0")))) }
+                    dys = lys map { |v| (f get("y0")) + (v * ((f get("y1")) - (f get("y0")))) }
+                    out append([dxs, dys])
+                    a = _middle(lxs, lys, total)
+                    (a != nil) ifTrue {
+                        k = a
+                        arrows append([dxs at(k), dys at(k), (dxs at(k + 1)) - (dxs at(k)), (dys at(k + 1)) - (dys at(k))])
+                    }
+                }
+            }
+        }
+        #{lines: out, arrows: arrows}
+    }
+
+    _toAxes(f, v, isX) {
+        isX ifTrue { (v - (f get("x0"))) / ((f get("x1")) - (f get("x0"))) } ifFalse { (v - (f get("y0"))) / ((f get("y1")) - (f get("y0"))) }
+    }
+
+    // The mask cell of an axes point, or nil outside the domain
+    _cell(st, px, py) {
+        ((px < 0) || (py < 0) || (px > 1) || (py > 1)) ifTrue { return nil }
+        mnx = st get("mnx")
+        mny = st get("mny")
+        i = Math min(Math floor(px * mnx) toInt, mnx - 1)
+        j = Math min(Math floor(py * mny) toInt, mny - 1)
+        (j * mnx) + i
+    }
+
+    // Follow the flow from (px, py), sign 1 along it or -1 against it:
+    // [pxs, pys, length], marking the mask cells it enters (in marks)
+    _trace(st, px, py, sign, startCell, marks) {
+        f = st get("f")
+        h = st get("h")
+        mask = st get("mask")
+        broken = st get("broken")
+        maxlen = st get("maxlength")
+        pxs = [px]
+        pys = [py]
+        len = 0.0
+        cur = startCell
+        go = true
+        n = 0
+        { go } whileTrue {
+            d1 = _dir(f, px, py)
+            (d1 == nil) ifTrue { go = false } ifFalse {
+                mx = px + (sign * (h / 2) * (d1 at(0)))
+                my = py + (sign * (h / 2) * (d1 at(1)))
+                d2 = _dir(f, mx, my)
+                (d2 == nil) ifTrue { go = false } ifFalse {
+                    nxp = px + (sign * h * (d2 at(0)))
+                    nyp = py + (sign * h * (d2 at(1)))
+                    cell = _cell(st, nxp, nyp)
+                    (cell == nil) ifTrue {
+                        // to the edge: the last part of the step that is inside
+                        t = 1.0
+                        (nxp < 0) ifTrue { t = Math min(t, px / (px - nxp)) }
+                        (nxp > 1) ifTrue { t = Math min(t, (1 - px) / (nxp - px)) }
+                        (nyp < 0) ifTrue { t = Math min(t, py / (py - nyp)) }
+                        (nyp > 1) ifTrue { t = Math min(t, (1 - py) / (nyp - py)) }
+                        ex = px + (t * (nxp - px))
+                        ey = py + (t * (nyp - py))
+                        len = len + (t * h)
+                        pxs append(ex); pys append(ey)
+                        go = false
+                    } ifFalse {
+                        (cell != cur) ifTrue {
+                            ((mask at(cell)) != 0) ifTrue {
+                                broken ifTrue { go = false }
+                            } ifFalse {
+                                mask setAt(cell, 1)
+                                marks append(cell)
+                            }
+                            cur = cell
+                        }
+                        go ifTrue {
+                            px = nxp
+                            py = nyp
+                            len = len + h
+                            pxs append(px); pys append(py)
+                            n = n + 1
+                            ((len >= maxlen) || (n > 100000)) ifTrue { go = false }
+                        }
+                    }
+                }
+            }
+        }
+        [pxs, pys, len]
+    }
+
+    // The index of the point at the middle of a line (by length), whose next
+    // point gives the arrow's direction; nil for a line of one point
+    _middle(xs, ys, total) {
+        (xs size < 2) ifTrue { return nil }
+        half = total / 2
+        acc = 0.0
+        k = 0
+        { (k < (xs size - 2)) && (acc < half) } whileTrue {
+            ddx = (xs at(k + 1)) - (xs at(k))
+            ddy = (ys at(k + 1)) - (ys at(k))
+            acc = acc + Math sqrt((ddx * ddx) + (ddy * ddy))
+            k = k + 1
+        }
+        Math max(0, k - 1)
+    }
+
+    // The mask's cells from the edge in, as matplotlib's _gen_starting_points
+    _spiral(nx, ny) {
+        out = []
+        xfirst = 0
+        yfirst = 1
+        xlast = nx - 1
+        ylast = ny - 1
+        x = 0
+        y = 0
+        dir = "right"
+        (nx * ny) times { |i|
+            out append([x, y])
+            (dir == "right") ifTrue {
+                x = x + 1
+                (x >= xlast) ifTrue { xlast = xlast - 1; dir = "up" }
+            } ifFalse {
+                (dir == "up") ifTrue {
+                    y = y + 1
+                    (y >= ylast) ifTrue { ylast = ylast - 1; dir = "left" }
+                } ifFalse {
+                    (dir == "left") ifTrue {
+                        x = x - 1
+                        (x <= xfirst) ifTrue { xfirst = xfirst + 1; dir = "down" }
+                    } ifFalse {
+                        y = y - 1
+                        (y <= yfirst) ifTrue { yfirst = yfirst + 1; dir = "right" }
+                    }
+                }
+            }
+        }
+        out
+    }
+}

@@ -363,6 +363,67 @@ PlotAxes = Object clone {
         art
     }
 
+    // Streamlines of a vector field: streamplot(X, Y, U, V, opts), as
+    // matplotlib's. X, Y: one value per column and row of U and V (evenly
+    // spaced), or mesh grids, or nil for 0, 1, 2 ...; U, V: rows. opts:
+    // density (1, or [x, y]: lines closer or further apart), color (one, or
+    // rows like U's: coloured through cmap, with vmin, vmax, and a colorbar),
+    // linewidth (points; one, or rows), arrowsize (1), arrowstyle ("-|>", or
+    // "-" for none), minlength (0.1) and maxlength (4: in axes widths),
+    // startPoints ([[x, y], ...]: lines from there), integrationDirection
+    // ("both", "forward", "backward"), brokenStreamlines (false: lines don't
+    // stop where they meet others), alpha, label. Returns the artist.
+    streamplot(x, y, u, v, opts = nil) {
+        o = opts ?? #{}
+        f = PlotStream field(_dxGrid(x), y, u, v)
+        res = PlotStream lines(f, #{density: o get("density"), minlength: o get("minlength"), maxlength: o get("maxlength"),
+                                    startPoints: o get("startPoints") ?? o get("start_points"),
+                                    direction: o get("integrationDirection") ?? o get("integration_direction"),
+                                    broken: o get("brokenStreamlines") ?? o get("broken_streamlines")})
+        lines = res get("lines")
+        c = o get("color")
+        lw = o get("linewidth") ?? o get("lw")
+        art = #{kind: "stream", lines: lines, arrows: res get("arrows"), alpha: o get("alpha"), label: o get("label"),
+                arrowsize: o get("arrowsize") ?? 1, arrowstyle: o get("arrowstyle") ?? "-|>",
+                cmap: o get("cmap") ?? _rc("image.cmap"), extent: [f get("x0"), f get("x1"), f get("y0"), f get("y1")]}
+        // per-point colours and widths, sampled from rows like U's
+        perPoint = { |rows|
+            ((rows size != f get("ny")) || ((rows find { |r| (r type != "Array") || (r size != f get("nx")) }) != nil)) ifTrue {
+                raise("Plot: streamplot: color and linewidth rows must be the shape of U")
+            }
+            g = rows flatten
+            lines map { |l|
+                (0..((l at(0)) size - 1)) map { |k|
+                    PlotStream sample(f, g, PlotStream _toAxes(f, (l at(0)) at(k), true), PlotStream _toAxes(f, (l at(1)) at(k), false))
+                }
+            }
+        }
+        ((c type == "Array") && (c size > 0) && (c first type == "Array")) ifTrue {
+            vals = perPoint value(c)
+            art set("vals", vals)
+            all = vals flatten
+            art set("values", all)
+            _setRange(art, all, o)
+            art set("color", PlotColor hex("k"))
+        } ifFalse {
+            art set("color", PlotColor hex(c ?? _nextCycle))
+        }
+        ((lw type == "Array") && (lw size > 0) && (lw first type == "Array")) ifTrue {
+            art set("lws", perPoint value(lw))
+            art set("linewidth", _rc("lines.linewidth"))
+        } ifFalse {
+            art set("linewidth", lw ?? _rc("lines.linewidth"))
+        }
+        artists append(art)
+        art
+    }
+
+    // X for a field: Date objects as days, as other x data
+    _dxGrid(x) {
+        ((x type == "Array") && (x size > 0) && (x first type == "Date")) ifTrue { return _dx(x) }
+        x
+    }
+
     // Numbers in a field: rows flattened, or a flat list as it is
     _flatField(v) {
         a = _seqOrRows(v)
@@ -1511,6 +1572,80 @@ PlotAxes = Object clone {
         (k == "polygon") ifTrue { return _drawPolygons(cv, art) }
         (k == "quadmesh") ifTrue { return _drawQuadmesh(cv, art) }
         (k == "quiver") ifTrue { return _drawQuiver(cv, art) }
+        (k == "stream") ifTrue { return _drawStream(cv, art) }
+        nil
+    }
+
+    // Streamlines: each a line (in segments, when coloured or sized by point),
+    // with an arrowhead at its middle
+    _drawStream(cv, art) {
+        vals = art get("vals")
+        lws = art get("lws")
+        lut = (vals != nil) ifTrue { PlotColor lut(art get("cmap")) } ifFalse { nil }
+        alpha = art get("alpha")
+        base = art get("color")
+        lines = art get("lines")
+        lines size times { |n|
+            xs = (lines at(n)) at(0)
+            ys = (lines at(n)) at(1)
+            px = xs map { |v| _px(v) }
+            py = ys map { |v| _py(v) }
+            ((vals == nil) && (lws == nil)) ifTrue {
+                cv polyline(px, py, #{stroke: base, width: _pt(art get("linewidth")), alpha: alpha, join: "round", cap: "round"})
+            } ifFalse {
+                (px size - 1) times { |k|
+                    c = base
+                    (vals != nil) ifTrue {
+                        a = (vals at(n)) at(k)
+                        b = (vals at(n)) at(k + 1)
+                        c = _cellColor(art, lut, ((a == nil) || (b == nil)) ifTrue { a ?? b } ifFalse { (a + b) / 2 }) ?? base
+                    }
+                    w = art get("linewidth")
+                    (lws != nil) ifTrue { w = ((lws at(n)) at(k)) ?? w }
+                    cv line(px at(k), py at(k), px at(k + 1), py at(k + 1), #{stroke: c, width: _pt(w), alpha: alpha, cap: "round"})
+                }
+            }
+        }
+        ((art get("arrowstyle")) != "-") ifTrue {
+            size = art get("arrowsize")
+            hl = _pt(7) * size
+            hw = _pt(2.8) * size
+            art get("arrows") each { |a|
+                x0 = _px(a at(0))
+                y0 = _py(a at(1))
+                ddx = _px((a at(0)) + (a at(2))) - x0
+                ddy = _py((a at(1)) + (a at(3))) - y0
+                len = Math sqrt((ddx * ddx) + (ddy * ddy))
+                (len > 0) ifTrue {
+                    ux = ddx / len
+                    uy = ddy / len
+                    tipX = x0 + (ux * (hl / 2))
+                    tipY = y0 + (uy * (hl / 2))
+                    bx = tipX - (ux * hl)
+                    by = tipY - (uy * hl)
+                    c = base
+                    (vals != nil) ifTrue {
+                        k = _streamPoint(art, a)
+                        (k != nil) ifTrue { c = _cellColor(art, lut, ((vals at(k at(0))) at(k at(1)))) ?? base }
+                    }
+                    cv polygon([tipX, bx - (uy * hw), bx + (uy * hw)], [tipY, by + (ux * hw), by - (ux * hw)], #{fill: c, alpha: alpha})
+                }
+            }
+        }
+    }
+
+    // Which line and point an arrow sits at: [line, point], or nil
+    _streamPoint(art, a) {
+        lines = art get("lines")
+        lines size times { |n|
+            xs = (lines at(n)) at(0)
+            ys = (lines at(n)) at(1)
+            k = 0
+            { k < xs size } whileTrue {
+                (((xs at(k)) == (a at(0))) && ((ys at(k)) == (a at(1)))) ifTrue { return [n, k] }
+                k = k + 1
+            }
+        }
         nil
     }
 
@@ -2575,7 +2710,7 @@ PlotAxes = Object clone {
     _legendHandle(cv, a, hx, y, fs, handle) {
         k = a get("kind")
         color = PlotColor hex(a get("color") ?? "#000000")
-        (k == "line" || k == "hline" || k == "vline" || k == "contour" || k == "quiver") ifTrue {
+        (k == "line" || k == "hline" || k == "vline" || k == "contour" || k == "quiver" || k == "stream") ifTrue {
             ls = a get("linestyle") ?? "-"
             lw = _pt(a get("linewidth") ?? _rc("lines.linewidth"))
             ((ls != "none") && (ls != "")) ifTrue {
@@ -2898,6 +3033,13 @@ PlotAxes = Object clone {
             (k == "quadmesh") ifTrue {
                 a get("xs") each { |r| r each(incX) }
                 a get("ys") each { |r| r each(incY) }
+                useX ifTrue { tight setAt(0, true) }
+                useY ifTrue { tight setAt(1, true) }
+            }
+            (k == "stream") ifTrue {
+                e = a get("extent")
+                incX value(e at(0)); incX value(e at(1))
+                incY value(e at(2)); incY value(e at(3))
                 useX ifTrue { tight setAt(0, true) }
                 useY ifTrue { tight setAt(1, true) }
             }
