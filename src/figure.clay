@@ -212,15 +212,21 @@ PlotFigure = Object clone {
     // Remove all axes
     clear() { self axesList = []; self suptitleText = nil; self legendOpts = nil; self }
 
-    // Save to a file; the extension picks the format: .png, .svg or .pdf.
-    // opts: dpi (pixels per inch for this file; the figure's own by default;
-    // a PDF is vector graphics, so it has none)
+    // Save to a file; the extension picks the format: .png, .svg, .pdf or
+    // .html (an interactive page: see toHtml). opts: dpi (pixels per inch
+    // for this file; the figure's own by default; a PDF is vector graphics,
+    // so it has none), interactive (.svg: tooltips and legend toggles),
+    // title (.html)
     savefig(path, opts = nil) {
         dot = path lastIndexOf(".")
         ext = ((dot == nil) || (dot < 0)) ifTrue { "" } ifFalse { path slice(dot + 1, path length) lower }
         dpiFor = (opts == nil) ifTrue { nil } ifFalse { opts get("dpi") }
         (ext == "svg") ifTrue {
-            File write(path, toSvg(dpiFor))
+            File write(path, toSvg(opts ?? #{}))
+            return path
+        }
+        ((ext == "html") || (ext == "htm")) ifTrue {
+            File write(path, toHtml(opts))
             return path
         }
         (ext == "png") ifTrue {
@@ -231,16 +237,39 @@ PlotFigure = Object clone {
             File write(path, toPdf)
             return path
         }
-        raise("Plot: savefig can't write \"" + path + "\": use a .png, .svg or .pdf file name")
+        raise("Plot: savefig can't write \"" + path + "\": use a .png, .svg, .pdf or .html file name")
     }
 
-    // The figure as an SVG document (a String), e.g. to serve from a web app
-    toSvg(dpiFor = nil) {
-        _withDpi(dpiFor) {
+    // The figure as an SVG document (a String), e.g. to serve from a web app.
+    // opts: dpi (or the dpi itself), interactive (true: a tooltip for the
+    // point, bar, cell or wedge under the mouse, and legend entries that hide
+    // and show their series, by a script in the SVG; it runs when the SVG is
+    // opened in a browser or put in a page, not from an <img>)
+    toSvg(opts = nil) {
+        o = (opts type == "Dict") ifTrue { opts } ifFalse { #{dpi: opts} }
+        _withDpi(o get("dpi")) {
             cv = PlotSvg new(width, height, facecolor)
+            (o get("interactive") == true) ifTrue { cv interactive(((Plot rc get("font.size")) * dpi) / 72.0) }
             render(cv)
             cv finish
         }
+    }
+
+    // The figure as a web page (a String) holding its interactive SVG (see
+    // toSvg), scaled down to fit a narrow window. Needs nothing else: no
+    // libraries, no network. opts: dpi, interactive (false: a static
+    // figure), title (the page's: by default the figure's suptitle)
+    toHtml(opts = nil) {
+        o = opts ?? #{}
+        so = #{dpi: o get("dpi"), interactive: o get("interactive") != false}
+        svg = toSvg(so)
+        svg = svg slice(svg indexOf("<svg"), svg length)
+        title = o get("title") ?? suptitleText ?? "Figure"
+        bg = facecolor ?? "#ffffff"
+        "<!DOCTYPE html>\n<html>\n<head>\n<meta charset=\"utf-8\">\n<meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">\n" +
+        "<title>" + (title toString replace("&", "&amp;") replace("<", "&lt;") replace(">", "&gt;")) + "</title>\n" +
+        "<style>body{margin:0;padding:16px;background:" + bg + "}svg{display:block;margin:0 auto;max-width:100%;height:auto}</style>\n" +
+        "</head>\n<body>\n" + svg + "</body>\n</html>\n"
     }
 
     // The figure as a PNG file's bytes (a String)

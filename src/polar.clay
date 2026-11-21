@@ -13,6 +13,9 @@
 // the angles round it and circles for the radii.
 
 PlotPolarAxes = PlotAxes clone {
+    // no tooltips yet: they would show the x, y the points are drawn at
+    _tipsOn() { false }
+
     aspect = "equal"
     gridOn = true
     thetaZero = 0.0         // where angle 0 points, radians anticlockwise from east

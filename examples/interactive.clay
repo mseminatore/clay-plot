@@ -1,0 +1,42 @@
+// An interactive web page: hover over a point, bar, wedge or heatmap cell for
+// its values, and click a legend entry to hide or show its series. Writes
+// examples/out/interactive.html (open it in a browser) and an interactive
+// .svg. Run from the brick's directory: clay examples/interactive.clay
+import("plot")
+
+[fig, axs] = Plot subplots(2, 2, #{figsize: [10, 7]})
+
+// a learning curve: hover a point for its epoch and loss
+a = axs at(0) at(0)
+epochs = (1..12) toArray
+a plot(epochs, epochs map { |e| 0.25 + (1.2 / (e + 0.5)) }, #{label: "train", marker: "o", ms: 4})
+a plot(epochs, epochs map { |e| 0.35 + (1.1 / (e + 0.8)) + (e * 0.006) }, #{label: "validation", marker: "o", ms: 4})
+a xlabel("epoch")
+a ylabel("loss")
+a title("Learning curve")
+a legend
+
+// bars by category, with your own tooltip text
+b = axs at(0) at(1)
+b bar(["web", "store", "phone"], [210, 100, 90], #{color: ["C0", "C1", "C2"],
+      tooltip: ["web: 210 orders\nup 17% on May", "store: 100 orders\nup 11% on May", "phone: 90 orders\nup 20% on May"]})
+b title("Orders in June")
+
+// a donut: hover a wedge for its share
+c = axs at(1) at(0)
+c pie([45, 30, 15, 10], #{labels: ["search", "social", "email", "direct"], wedgeprops: #{width: 0.45}})
+c title("Where visitors came from")
+
+// a heatmap: hover a cell for its row, column and value
+d = axs at(1) at(1)
+days = ["Mon", "Tue", "Wed", "Thu", "Fri"]
+hours = ["9", "12", "15", "18"]
+d imshow([[3, 8, 6, 2], [4, 9, 7, 3], [5, 7, 8, 4], [4, 8, 9, 6], [2, 6, 5, 7]], #{cmap: "Blues"})
+d xticks([0, 1, 2, 3], hours)
+d yticks([0, 1, 2, 3, 4], days)
+d xlabel("hour")
+d title("Busy hours")
+
+fig suptitle("Interactive figures")
+fig savefig("examples/out/interactive.html")
+fig savefig("examples/out/interactive.svg", #{interactive: true})

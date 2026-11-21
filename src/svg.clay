@@ -13,6 +13,14 @@
 // cap, join. Text styles: size (px), color, anchor ("start", "middle",
 // "end"), valign ("baseline", "center", "top", "bottom"), rotate (degrees,
 // counter-clockwise), weight.
+//
+// Interactive (interactive(fontSize) before drawing; Figure toSvg(#{interactive:
+// true}) and toHtml do it): the axes wrap each artist in a series group and
+// register what can be hovered (tipPoint, tipRect, tipGrid, tipWedge), and
+// finish adds a script that shows a tooltip for the point, bar, cell or wedge
+// under the mouse and lets a click on a legend entry hide or show its series.
+// The script is the SVG's own (no libraries), so the SVG works on its own in a
+// browser or pasted into any HTML page, several to a page.
 
 PlotSvg = Object clone {
     width = 0
@@ -20,6 +28,12 @@ PlotSvg = Object clone {
     parts = nil
     clips = 0
     family = "DejaVu Sans, Arial, Helvetica, sans-serif"
+    isInteractive = false
+    uid = nil               // the svg element's id, when interactive
+    tipSize = 12
+    tipAxes = nil           // [x, y, w, h] of each axes' box, as JSON
+    tips = nil              // hover targets, as JSON
+    nSeries = 0
 
     init(w, h, background = "#ffffff") {
         self width = w
@@ -29,13 +43,102 @@ PlotSvg = Object clone {
         parts append("<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n")
         parts append("<svg xmlns=\"http://www.w3.org/2000/svg\" xmlns:xlink=\"http://www.w3.org/1999/xlink\" width=\"" + num(w) + "\" height=\"" + num(h) +
             "\" viewBox=\"0 0 " + num(w) + " " + num(h) + "\" font-family=\"" + family + "\">\n")
+        self isInteractive = false
         (background != nil) ifTrue {
             parts append("<rect width=\"100%\" height=\"100%\" fill=\"" + background + "\"/>\n")
         }
     }
 
     // The finished document
-    finish() { parts join("") + "</svg>\n" }
+    finish() {
+        isInteractive ifTrue { parts append(_script) }
+        parts join("") + "</svg>\n"
+    }
+
+    // --- interactive output ---
+
+    // Make what is drawn next hoverable; size is the tooltip's font size (px)
+    interactive(size = 12) {
+        self isInteractive = true
+        self tipSize = size
+        self tipAxes = []
+        self tips = []
+        self nSeries = 0
+        self uid = "plt" + (Crypto randomHex(6))
+        // the id goes on the svg element written by init
+        parts setAt(1, (parts at(1)) replace("<svg ", "<svg id=\"" + uid + "\" "))
+        self
+    }
+
+    // An axes' box, hit-tested first: returns its index for the tip* calls
+    tipBox(x, y, w, h) {
+        tipAxes append("[" + num(x) + "," + num(y) + "," + num(w) + "," + num(h) + "]")
+        tipAxes size - 1
+    }
+
+    // A new series id, and the group its drawing goes in (endSeries closes it)
+    beginSeries() {
+        self nSeries = nSeries + 1
+        parts append("<g class=\"plt-s\" data-s=\"" + nSeries toString + "\">\n")
+        nSeries
+    }
+    endSeries() { parts append("</g>\n") }
+
+    // A legend entry for series sid (nil: not toggled); endLegendItem closes it
+    beginLegendItem(sid) {
+        (sid == nil) ifTrue { parts append("<g>\n") } ifFalse {
+            parts append("<g class=\"plt-l\" data-s=\"" + sid toString + "\" style=\"cursor:pointer\">\n")
+        }
+    }
+    endLegendItem() { parts append("</g>\n") }
+
+    // Hover targets in axes ax, series sid. lines: the tooltip's text, the
+    // first line its title ("" for none); color: the highlight's
+    tipPoint(ax, sid, x, y, lines, color) {
+        tips append("[0," + ax toString + "," + sid toString + "," + num(x) + "," + num(y) + "," + _jsonLines(lines) + "," + _json(color) + "]")
+    }
+    tipRect(ax, sid, x, y, w, h, lines, color) {
+        tips append("[1," + ax toString + "," + sid toString + "," + num(x) + "," + num(y) + "," + num(w) + "," + num(h) + "," +
+                    _jsonLines(lines) + "," + _json(color) + "]")
+    }
+    // A grid of nr x nc cells over x, y, w, h (row 0 at the top, or at the
+    // bottom with flipY), values row by row (nil: none); rowNames, colNames
+    // (or nil) name the rows and columns
+    tipGrid(ax, sid, x, y, w, h, nr, nc, flipY, values, title, rowNames, colNames) {
+        vals = values map { |v| ((v == nil) || (v type != "Number") || (v != v)) ifTrue { "null" } ifFalse { _jnum(v) } }
+        tips append("[2," + ax toString + "," + sid toString + "," + num(x) + "," + num(y) + "," + num(w) + "," + num(h) + "," +
+                    nr toString + "," + nc toString + "," + (flipY ifTrue { "1" } ifFalse { "0" }) + ",[" + (vals join(",")) + "]," +
+                    _json(title ?? "") + "," + _jsonNames(rowNames) + "," + _jsonNames(colNames) + "]")
+    }
+    // A pie wedge: centre, radii (px) and angles (degrees, anticlockwise on screen)
+    tipWedge(ax, sid, cx, cy, r0, r, a0, a1, lines, color) {
+        tips append("[3," + ax toString + "," + sid toString + "," + num(cx) + "," + num(cy) + "," + num(r0) + "," + num(r) + "," +
+                    num(a0) + "," + num(a1) + "," + _jsonLines(lines) + "," + _json(color) + "]")
+    }
+
+    _jsonLines(lines) { "[" + ((lines map { |l| _json(l) }) join(",")) + "]" }
+    _jsonNames(names) { (names == nil) ifTrue { "null" } ifFalse { _jsonLines(names map { |n| n toString }) } }
+
+    // A number for the script, to 6 significant digits
+    _jnum(v) {
+        (v == Math round(v) && (v abs < 100000000000000)) ifTrue { return (Math round(v)) toString }
+        PlotTicks short(v, 6)
+    }
+
+    // A JSON string; < is escaped so the data can't close the script
+    _json(v) {
+        (v == nil) ifTrue { return "null" }
+        t = v toString replace("\\", "\\\\") replace("\"", "\\\"") replace("\n", "\\n") replace("\r", "") replace("\t", " ")
+        "\"" + (t replace("<", "\\u003c") replace(">", "\\u003e") replace("&", "\\u0026")) + "\""
+    }
+
+    // The script: hit-testing, the tooltip and legend toggling, for this svg only
+    _script() {
+        data = "{a:[" + (tipAxes join(",")) + "],t:[" + (tips join(",\n")) + "]}"
+        "<script type=\"text/javascript\">//<![CDATA[\n(function(){var svg=document.getElementById(\"" + uid + "\");if(!svg)return;" +
+        "var D=" + data + ",FS=" + num(tipSize) + ",R=" + num(tipSize) + ";" + PlotSvgScript source +
+        "})();\n//]]></script>\n"
+    }
 
     line(x1, y1, x2, y2, style) {
         parts append("<line x1=\"" + num(x1) + "\" y1=\"" + num(y1) + "\" x2=\"" + num(x2) + "\" y2=\"" + num(y2) + "\"" + attrs(style) + "/>\n")
@@ -197,4 +300,54 @@ PlotSvg = Object clone {
     escape(s) {
         s toString replace("&", "&amp;") replace("<", "&lt;") replace(">", "&gt;") replace("\"", "&quot;")
     }
+}
+
+// The interactive SVG's script (PlotSvg _script puts its data, D, in front).
+// Targets: [0 point, ax, s, x, y, lines, color], [1 rect, ax, s, x, y, w, h,
+// lines, color], [2 grid, ax, s, x, y, w, h, nr, nc, flip, values, title,
+// rowNames, colNames], [3 wedge, ax, s, cx, cy, r0, r, a0, a1, lines, color].
+PlotSvgScript = Object clone {
+    source = "var NS='http://www.w3.org/2000/svg',hidden={};" +
+        "function mk(n,a){var e=document.createElementNS(NS,n);for(var k in a)e.setAttribute(k,a[k]);return e;}" +
+        "var hl=mk('g',{'pointer-events':'none'}),tip=mk('g',{'pointer-events':'none'});" +
+        "var box=mk('rect',{rx:3,ry:3,fill:'#ffffff','fill-opacity':0.95,stroke:'#999999','stroke-width':1});" +
+        "var txt=mk('text',{'font-size':FS,fill:'#222222'});tip.appendChild(box);tip.appendChild(txt);" +
+        "tip.style.display='none';svg.appendChild(hl);svg.appendChild(tip);" +
+        "function fmt(v){if(v===null||v===undefined)return '-';var a=Math.abs(v);" +
+        "if(a!==0&&(a>=1e6||a<1e-4))return v.toExponential(3);return String(Number(v.toPrecision(4)));}" +
+        "function at(e){var p=svg.createSVGPoint();p.x=e.clientX;p.y=e.clientY;return p.matrixTransform(svg.getScreenCTM().inverse());}" +
+        "function inAx(x,y){for(var i=D.a.length-1;i>=0;i--){var b=D.a[i];" +
+        "if(x>=b[0]&&x<=b[0]+b[2]&&y>=b[1]&&y<=b[1]+b[3])return i;}return -1;}" +
+        "function find(x,y){var ax=inAx(x,y);if(ax<0)return null;var best=null,bd=R*R,hit=null,i,t;" +
+        "for(i=0;i<D.t.length;i++){t=D.t[i];if(t[1]!==ax||hidden[t[2]])continue;" +
+        "if(t[0]===0){var dx=t[3]-x,dy=t[4]-y,d=dx*dx+dy*dy;if(d<=bd){bd=d;best={x:t[3],y:t[4],lines:t[5],c:t[6],k:'p'};}}" +
+        "else if(t[0]===1){if(x>=t[3]&&x<=t[3]+t[5]&&y>=t[4]&&y<=t[4]+t[6])hit={x:t[3],y:t[4],w:t[5],h:t[6],lines:t[7],c:t[8],k:'r'};}" +
+        "else if(t[0]===3){var ex=x-t[3],ey=t[4]-y,r=Math.sqrt(ex*ex+ey*ey);if(r>=t[5]&&r<=t[6]){" +
+        "var a=Math.atan2(ey,ex)*180/Math.PI,lo=Math.min(t[7],t[8]),hi=Math.max(t[7],t[8]);" +
+        "while(a<lo)a+=360;while(a>lo+360)a-=360;if(a<=hi)hit={x:x,y:y,lines:t[9],c:t[10],k:'w'};}}" +
+        "else if(t[0]===2&&!hit){if(x>=t[3]&&x<t[3]+t[5]&&y>=t[4]&&y<t[4]+t[6]){" +
+        "var cw=t[5]/t[8],ch=t[6]/t[7],c=Math.floor((x-t[3])/cw),rr=Math.floor((y-t[4])/ch),row=t[9]?t[7]-1-rr:rr;" +
+        "var v=t[10][row*t[8]+c],ls=[t[11]];" +
+        "ls.push((t[12]?t[12][row]:'row '+row)+', '+(t[13]?t[13][c]:'column '+c));ls.push('value: '+fmt(v));" +
+        "hit={x:t[3]+c*cw,y:t[4]+rr*ch,w:cw,h:ch,lines:ls,c:'#000000',k:'r'};}}}" +
+        "return best||hit;}" +
+        "function hide(){tip.style.display='none';while(hl.firstChild)hl.removeChild(hl.firstChild);}" +
+        "function show(h,x,y){while(hl.firstChild)hl.removeChild(hl.firstChild);" +
+        "if(h.k==='p')hl.appendChild(mk('circle',{cx:h.x,cy:h.y,r:FS*0.45,fill:'none',stroke:h.c||'#000000','stroke-width':2}));" +
+        "if(h.k==='r')hl.appendChild(mk('rect',{x:h.x,y:h.y,width:h.w,height:h.h,fill:'none',stroke:'#000000','stroke-width':1.5,'stroke-opacity':0.6}));" +
+        "while(txt.firstChild)txt.removeChild(txt.firstChild);var n=0;" +
+        "for(var i=0;i<h.lines.length;i++){var l=h.lines[i];if(l===''||l===null)continue;" +
+        "var s=mk('tspan',{x:0,dy:n===0?0:FS*1.25});if(i===0&&h.lines.length>1)s.setAttribute('font-weight','bold');" +
+        "s.textContent=l;txt.appendChild(s);n++;}" +
+        "if(n===0){hide();return;}tip.style.display='';var b=txt.getBBox(),p=FS*0.4;" +
+        "box.setAttribute('x',b.x-p);box.setAttribute('y',b.y-p);box.setAttribute('width',b.width+2*p);box.setAttribute('height',b.height+2*p);" +
+        "var W=svg.viewBox.baseVal.width,H=svg.viewBox.baseVal.height,tx=x+FS,ty=y+FS*1.5;" +
+        "if(tx+b.width+2*p>W)tx=x-FS-b.width-p;if(ty+b.height+p>H)ty=y-b.height-FS*0.5;if(tx<p)tx=p;if(ty<FS)ty=FS;" +
+        "tip.setAttribute('transform','translate('+tx+','+ty+')');}" +
+        "svg.addEventListener('mousemove',function(e){var p=at(e),h=find(p.x,p.y);if(h)show(h,p.x,p.y);else hide();});" +
+        "svg.addEventListener('mouseleave',hide);" +
+        "var items=svg.querySelectorAll('.plt-l');for(var j=0;j<items.length;j++){(function(it){" +
+        "it.addEventListener('click',function(){var s=it.getAttribute('data-s');hidden[s]=!hidden[s];" +
+        "var gs=svg.querySelectorAll('.plt-s[data-s=\\''+s+'\\']');for(var k=0;k<gs.length;k++)gs[k].style.display=hidden[s]?'none':'';" +
+        "it.style.opacity=hidden[s]?0.35:1;hide();});})(items[j]);}"
 }

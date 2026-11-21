@@ -1,6 +1,6 @@
 {
   "name": "plot",
-  "version": "0.6.0",
+  "version": "0.7.0",
   "clay": ">=0.3.7",
   "description": "Charts and figures in the style of matplotlib's pyplot: line, scatter, bar, pie, histogram and image plots, subplots, log axes, box, violin, contour, and live training curves, saved as PNG, SVG or PDF or drawn in the terminal",
   "main": "src/main.clay",

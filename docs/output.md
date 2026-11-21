@@ -2,12 +2,51 @@
 
 [← Back to the README](../README.md)
 
-Besides `savefig` to PNG, SVG and PDF files, a figure can become an animation, be drawn as text
-in a terminal, or be placed inside a larger PDF document.
+Besides `savefig` to PNG, SVG and PDF files, a figure can become an interactive web page or
+SVG, an animation, be drawn as text in a terminal, or be placed inside a larger PDF document.
 
+- [Interactive web pages and SVG](#interactive-web-pages-and-svg)
 - [Animation](#animation)
 - [In the terminal](#in-the-terminal)
 - [PDF](#pdf)
+
+## Interactive web pages and SVG
+
+`savefig("f.html")` writes a web page whose figure answers the mouse: hover over a point, bar,
+pie wedge or heatmap cell for its values, and click a legend entry to hide or show its series.
+The page is one file with nothing to load: no libraries, no network. From
+[`examples/interactive.clay`](../examples/interactive.clay):
+
+```clay norun
+fig savefig("dashboard.html")                          // a page to open in a browser
+fig savefig("dashboard.svg", #{interactive: true})     // or just the SVG
+svg = fig toSvg(#{interactive: true})                  // as text, e.g. for a web app's page
+page = Plot toHtml(#{title: "Sales"})                  // the current figure's page, as text
+```
+
+![Hovering over a learning curve, with the validation series hidden](images/interactive.png)
+
+A tooltip shows the series' label, then the values as the axes show them: named by the axis
+labels (`epoch: 5`), categories by name, dates as dates, histogram bars as their bin
+(`2 to 3`), pie wedges with their share, and image cells with their row and column (by tick
+label when there is one per row or column) and value. `tooltip:` on `plot`, `scatter` and
+`bar` replaces the text with your own, a String per point (`\n` starts a new line), or turns
+it off with `false`:
+
+```clay norun
+Plot scatter(xs, ys, #{tooltip: names})                // a name per point
+Plot bar(regions, sales, #{tooltip: notes})
+Plot plot(xs, noise, #{tooltip: false})
+```
+
+The SVG carries its own small script, so it works opened on its own in a browser or placed in
+any HTML page, several to a page; an `<img>` tag shows it but doesn't run scripts, so it is
+static there. The page scales the figure down to fit a narrow window. Lines with more than
+5000 points get a tooltip at every few, about 5000 in all.
+
+Tooltips cover lines, markers, scatter points, bars and histograms, pie and donut wedges, and
+`imshow` heatmaps (confusion matrices too). Box plots, violins, contours, filled areas, meshes,
+hexbins and polar axes are drawn as usual, without tooltips. There is no zoom or pan.
 
 ## Animation
 

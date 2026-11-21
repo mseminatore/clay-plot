@@ -23,7 +23,7 @@ Plot plot(epochs, train, #{label: "train"})
 Plot plot(epochs, valid, "--", #{label: "validation"})
 Plot xlabel("epoch"); Plot ylabel("loss"); Plot title("Learning curve")
 Plot grid; Plot legend
-Plot savefig("loss.png")            // or "loss.svg", "loss.pdf"
+Plot savefig("loss.png")            // or "loss.svg", "loss.pdf", "loss.html" (interactive)
 ```
 
 ![A learning curve](docs/images/learning_curve.svg)
@@ -57,7 +57,8 @@ fig savefig("subplots.svg")
   strings, colours and colormaps, and limitations
 - [Machine learning](docs/ml.md): learning curves, confusion matrices, ROC and
   precision-recall curves, decision boundaries, embeddings and image grids
-- [Output](docs/output.md): animated GIFs and PNGs, drawing in the terminal, and PDF documents
+- [Output](docs/output.md): interactive web pages and SVG (tooltips, legend toggles),
+  animated GIFs and PNGs, drawing in the terminal, and PDF documents
 - [Coming from Python](docs/coming-from-python.md): Python plotting calls side by side with
   clay-plot's
 - [Contributing](CONTRIBUTING.md): building, testing and how the code is laid out

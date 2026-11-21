@@ -1062,7 +1062,76 @@ Test describe("SVG output") {
         File delete(path)
         File delete(dir)
         e = Test assertRaises({ Plot savefig("x.bmp") })
-        Test assertTrue(e message contains(".png, .svg or .pdf"))
+        Test assertTrue(e message contains(".png, .svg, .pdf or .html"))
+    }
+    Test it("adds tooltips and legend toggles to interactive SVG") {
+        Plot close
+        Plot plot([1, 2, 3], [4, 5, 6], #{label: "loss"})
+        Plot scatter([1, 2], [5, 4], #{label: "points", tooltip: ["first", "second\nline"]})
+        Plot xlabel("epoch")
+        Plot legend
+        plain = Plot toSvg
+        Test assertFalse(plain contains("<script"))                          // static unless asked
+        svg = Plot toSvg(#{interactive: true})
+        Test assertTrue(svg contains("<script"))
+        Test assertTrue(svg contains("class=\"plt-s\" data-s=\"1\""))       // each artist a series
+        Test assertTrue(svg contains("class=\"plt-l\" data-s=\"1\""))       // its legend entry toggles it
+        Test assertTrue(svg contains("[\"loss\",\"epoch: 2\",\"y: 5\"]"))  // axis labels, values
+        Test assertTrue(svg contains("[\"points\",\"second\",\"line\"]"))  // custom text, by line
+        Test assertTrue((svg indexOf("<svg id=\"plt")) > 0)                   // its own id, for its script
+        Test assertEqual((svg split("<script")) size, 2)
+        Plot close
+    }
+    Test it("gives bars, histograms, pies and heatmaps tooltips") {
+        Plot close
+        Plot bar(["apples", "pears"], [3, 7])
+        svg = Plot toSvg(#{interactive: true})
+        Test assertTrue(svg contains("\"x: pears\",\"y: 7\""))            // categories by name
+        Plot close
+        Plot hist([1, 1, 2, 3], 2)
+        Test assertTrue((Plot toSvg(#{interactive: true})) contains("\"x: 1 to 2\",\"y: 2\""))   // bins as ranges
+        Plot close
+        Plot pie([1, 3], #{labels: ["a", "b"]})
+        Test assertTrue((Plot toSvg(#{interactive: true})) contains("[\"b\",\"3 (75%)\"]"))
+        Plot close
+        Plot imshow([[1, 2], [3, 4.5]])
+        Plot xticks([0, 1], ["no", "yes"])
+        svg = Plot toSvg(#{interactive: true})
+        Test assertTrue(svg contains("[1,2,3,4.5]") && svg contains("[\"no\",\"yes\"]"))   // cells, column names
+        Plot close
+        Plot plot([1, 2], #{tooltip: false})
+        Test assertFalse((Plot toSvg(#{interactive: true})) contains("[0,"))   // turned off
+        Plot close
+        Plot plot(["2024-03-05", "2024-03-06"], [1, 2])
+        Test assertTrue((Plot toSvg(#{interactive: true})) contains("x: 2024-03-06"))
+        Plot close
+    }
+    Test it("writes interactive web pages") {
+        Plot close
+        Plot plot([1, 2])
+        Plot suptitle("Growth & more")
+        page = Plot toHtml
+        Test assertTrue(page startsWith("<!DOCTYPE html>"))
+        Test assertTrue(page contains("<title>Growth &amp; more</title>"))
+        Test assertTrue(page contains("<script") && (page contains("<?xml") not))
+        Test assertFalse((Plot toHtml(#{interactive: false})) contains("<script"))
+        dir = File tempDir
+        path = dir + "/out.html"
+        Plot savefig(path)
+        Test assertTrue(File read(path) contains("<svg id=\"plt"))
+        File delete(path)
+        File delete(dir)
+        // a twin's points share the host's box; polar axes have none yet
+        Plot close
+        ax = Plot gca
+        ax plot([1, 2], [1, 2])
+        ax twinx plot([1, 2], [10, 20])
+        svg = Plot toSvg(#{interactive: true})
+        Test assertTrue(svg contains("[0,0,2,") && (svg contains("a:[[") ))
+        Plot close
+        Plot polar([0, 1], [1, 2])
+        Test assertFalse((Plot toSvg(#{interactive: true})) contains("[0,0,"))
+        Plot close
     }
     Test it("measures text with the font") {
         Test assertTrue(PlotSvg measure("MMMM", 10) > PlotSvg measure("iiii", 10))

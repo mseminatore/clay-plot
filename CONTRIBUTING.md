@@ -13,6 +13,7 @@ clay examples/dates_density.clay
 clay examples/animation.clay
 clay examples/layout.clay
 clay examples/fields.clay
+clay examples/interactive.clay
 ```
 
 `examples/fashion_mnist.clay` also needs clay-ann; its header says how to run it.

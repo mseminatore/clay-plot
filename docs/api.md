@@ -76,8 +76,9 @@ return the artist they add, a Dict (`line get("color")`, `line set("label", "new
 | `Plot gcf`, `Plot gca`, `Plot sca(ax)` | The current figure and axes; make an axes current |
 | `fig axes`, `fig ax(row, col)` | All the figure's axes; the one at a grid position |
 | `suptitle(s, opts)` | A title above all the subplots |
-| `savefig(path, opts)` | Save; the extension picks the format, `.png`, `.svg` or `.pdf`. `opts`: `dpi`, to save at another resolution than the figure's (`#{dpi: 200}` for print; a PDF is vector graphics and has none). |
-| `toPng(dpi)`, `toSvg(dpi)`, `toPdf` | The figure as a PNG file's bytes, as SVG text or as a PDF file's bytes, e.g. to return from a web handler |
+| `savefig(path, opts)` | Save; the extension picks the format, `.png`, `.svg`, `.pdf` or `.html` (an [interactive page](output.md#interactive-web-pages-and-svg)). `opts`: `dpi`, to save at another resolution than the figure's (`#{dpi: 200}` for print; a PDF is vector graphics and has none); `interactive` (`.svg`: tooltips and legend toggles); `title` (`.html`). |
+| `toPng(dpi)`, `toSvg(opts)`, `toPdf` | The figure as a PNG file's bytes, as SVG text or as a PDF file's bytes, e.g. to return from a web handler. `toSvg` takes the dpi or `#{dpi:, interactive:}`. |
+| `toHtml(opts)` | The figure as an interactive web page (a String). `opts`: `dpi`, `interactive` (`false`: static), `title`. `Plot toHtml` is the current figure's. |
 | `drawPdf(page, x, y, width)` | Draw the figure on a clay-pdf page with its top-left corner at (x, y), in points, scaled to `width` (default: its size at 72 points an inch); returns the height it takes. See [PDF](output.md#pdf). |
 | `toCanvas(dpi)` | The figure drawn on a clay-image `Canvas`, to draw more on it, or `toImage` for an `Image` |
 | `show` | Save to a temporary PNG and open it in the system's image viewer. `Plot show` then starts a fresh figure. Returns the file's path. |
@@ -120,4 +121,6 @@ Colormaps: `viridis` (the default), `plasma`, `inferno`, `magma`, `cividis`, `gr
   another sans-serif, which may sit a little closer or further than intended.
 - In SVG, images are embedded as base64 PNG, about a third larger than the PNG itself (a
   128 x 400 spectrogram is about 200 KB).
+- Interactive output gives tooltips for lines, points, bars, pie wedges and heatmaps only, and
+  none on polar axes; there is no zoom or pan.
 - Dates go on the x axis only. No symlog scales or 3-D yet. Log axes label only powers of ten (and 1, 2, 5 when less than two decades show).

@@ -38,6 +38,8 @@ PlotAxes = Object clone {
     hideYTicks = false
     xDates = false          // x holds dates: days since the day xOrigin
     xOrigin = nil           // (days since 1970) of the first date plotted
+    _tcv = nil              // while drawing interactive SVG: the canvas (else nil)
+    _tipAx = nil            // and this axes' box index in it
     // worked out while drawing
     plotBox = nil           // [x, y, w, h] in pixels
     view = nil              // [x0, x1, y0, y1] in data units
@@ -94,7 +96,7 @@ PlotAxes = Object clone {
         c = opts get("c") ?? opts get("color")
         art = #{kind: "scatter", xs: xs, ys: ys, marker: opts get("marker") ?? "o",
                 sizes: opts get("s") ?? Math pow(_rc("lines.markersize"), 2),
-                alpha: opts get("alpha"), label: opts get("label"),
+                alpha: opts get("alpha"), label: opts get("label"), tooltip: opts get("tooltip"),
                 edgecolor: _hexOrNil(opts get("edgecolors") ?? opts get("edgecolor")),
                 cmap: opts get("cmap") ?? _rc("image.cmap")}
         ((c type == "Array") && (c size == xs size) && (c size > 0) && (c first type == "Number")) ifTrue {
@@ -1383,11 +1385,23 @@ PlotAxes = Object clone {
         }
         // twins are drawn here with their host, over the same box
         group = _group
+        // interactive SVG: each artist in a series group, its points hoverable
+        tcv = (_tipsOn && (cv hasMethod("tipPoint")) && (cv isInteractive)) ifTrue { cv } ifFalse { nil }
+        tax = (tcv != nil) ifTrue { tcv tipBox(bx, by, bw, bh) } ifFalse { nil }
+        group each { |ax| ax _tcv = tcv; ax _tipAx = tax }
         group each { |ax| (ax gridOn && ax axisVisible) ifTrue { ax _drawGrid(cv) } }
         cv clip(bx, by, bw, bh)
         group each { |ax|
             [0, 1, 2] each { |z|
-                ax artists each { |art| (ax _zorder(art) == z) ifTrue { ax _drawArtist(cv, art) } }
+                ax artists each { |art|
+                    (ax _zorder(art) == z) ifTrue {
+                        (tcv != nil) ifTrue {
+                            art set("_sid", tcv beginSeries)
+                            ax _drawArtist(cv, art)
+                            tcv endSeries
+                        } ifFalse { ax _drawArtist(cv, art) }
+                    }
+                }
             }
         }
         cv unclip
@@ -1411,7 +1425,71 @@ PlotAxes = Object clone {
         }
         group each { |ax| (ax legendOpts != nil) ifTrue { ax _drawLegend(cv) } }
         (colorbarArtist != nil) ifTrue { _drawColorbar(cv) }
+        group each { |ax| ax _tcv = nil }
     }
+
+    // --- tooltips (interactive SVG) ---
+
+    // Whether this kind of axes gives tooltips (polar axes don't yet)
+    _tipsOn() { true }
+
+    // What an axis is called in a tooltip: its label, or x / y
+    _tipName(isX) {
+        t = isX ifTrue { xlabelText } ifFalse { ylabelText }
+        ((t == nil) || (t == "") || (PlotMath has(t))) ifTrue { return isX ifTrue { "x" } ifFalse { "y" } }
+        t toString
+    }
+
+    // A value as its axis shows it: a category's name, a date, or a short number
+    _tipVal(v, isX) {
+        (v == nil) ifTrue { return "-" }
+        (v type != "Number") ifTrue { return v toString }
+        spec = isX ifTrue { xtickSpec } ifFalse { ytickSpec }
+        ((spec != nil) && (spec get("labels") != nil) && (spec get("values") != nil)) ifTrue {
+            i = (spec get("values")) indexOf(v)
+            ((i != nil) && (i >= 0) && (i < (spec get("labels")) size)) ifTrue { return ((spec get("labels")) at(i)) toString }
+        }
+        isX ifTrue {
+            da = _dateAxes
+            ((da xDates) && (twinKind != "y") && (da xOrigin != nil)) ifTrue { return _tipDate(da xOrigin + v) }
+        }
+        PlotTicks short(v, 4)
+    }
+
+    // A day number (days since 1970) as 2024-03-05, with the time if it has one
+    _tipDate(day) {
+        d = Math floor(day)
+        ymd = PlotDates civilFromDays(d toInt)
+        text = (ymd at(0)) toString + "-" + ((ymd at(1)) toString padLeft(2, "0")) + "-" + ((ymd at(2)) toString padLeft(2, "0"))
+        mins = Math round((day - d) * 1440) toInt
+        ((mins > 0) && (mins < 1440)) ifTrue {
+            text = text + " " + ((mins / 60) toString padLeft(2, "0")) + ":" + ((mins % 60) toString padLeft(2, "0"))
+        }
+        text
+    }
+
+    // A tooltip's lines for point i of art: its custom text (tooltip: an
+    // Array of Strings) or the extra lines, under the artist's label
+    _tipLines(art, i, extra) {
+        custom = art get("tooltip")
+        body = ((custom type == "Array") && (i < custom size)) ifTrue { (custom at(i)) toString split("\n") } ifFalse { extra }
+        [art get("label") ?? ""] + body
+    }
+
+    // At most about 5000 hover points per artist: the step between them
+    _tipStep(n) { (n > 5000) ifTrue { (n + 4999) / 5000 } ifFalse { 1 } }
+
+    // The names of rows (or columns) 0..n-1 from an axis's tick labels, if it has one per index
+    _tipIndexNames(spec, n) {
+        ((spec == nil) || (spec get("labels") == nil) || (spec get("values") == nil)) ifTrue { return nil }
+        vals = spec get("values")
+        (vals size != n) ifTrue { return nil }
+        n times { |k| (vals at(k) != k) ifTrue { return nil } }
+        spec get("labels")
+    }
+
+    // Whether art gives tooltips here
+    _tipping(art) { (_tcv != nil) && (art get("tooltip") != false) }
 
     _drawArtist(cv, art) {
         k = art get("kind")
@@ -1484,6 +1562,19 @@ PlotAxes = Object clone {
                 (_okX(x) && _okY(y)) ifTrue { _marker(cv, marker, _px(x), _py(y), ms, face, edge, alpha) }
             }
         }
+        _tipping(art) ifTrue {
+            step = _tipStep(xs size)
+            i = 0
+            { i < xs size } whileTrue {
+                x = xs at(i)
+                y = ys at(i)
+                (_okX(x) && _okY(y)) ifTrue {
+                    _tcv tipPoint(_tipAx, art get("_sid"), _px(x), _py(y),
+                        _tipLines(art, i, [_tipName(true) + ": " + _tipVal(x, true), _tipName(false) + ": " + _tipVal(y, false)]), color)
+                }
+                i = i + step
+            }
+        }
     }
 
     // A run of points, as steps for drawstyle "steps-pre", "steps-post" or
@@ -1532,6 +1623,11 @@ PlotAxes = Object clone {
                 }
                 (colors != nil) ifTrue { color = colors at(i) }
                 (color != nil) ifTrue { _marker(cv, marker, _px(x), _py(y), _pt(Math sqrt(s)), color, edge ?? color, alpha) }
+                ((color != nil) && _tipping(art) && ((i % _tipStep(xs size)) == 0)) ifTrue {
+                    extra = [_tipName(true) + ": " + _tipVal(x, true), _tipName(false) + ": " + _tipVal(y, false)]
+                    (values != nil) ifTrue { extra append((colorbarLabel ?? "value") toString + ": " + PlotTicks short(values at(i), 4)) }
+                    _tcv tipPoint(_tipAx, art get("_sid"), _px(x), _py(y), _tipLines(art, i, extra), color)
+                }
             }
         }
     }
@@ -1556,15 +1652,28 @@ PlotAxes = Object clone {
                     y0 = _py(span at(0))
                     y1 = _py(span at(1))
                     cv rect(Math min(x0, x1), Math min(y0, y1), (x1 - x0) abs, (y1 - y0) abs, style)
+                    _tipping(art) ifTrue { _tipBar(art, i, span, len, false, x0, x1, y0, y1, fill) }
                 } ifFalse {
                     x0 = _px(span at(0))
                     x1 = _px(span at(1))
                     y0 = _py(base)
                     y1 = _py(base + len)
                     cv rect(Math min(x0, x1), Math min(y0, y1), (x1 - x0) abs, (y1 - y0) abs, style)
+                    _tipping(art) ifTrue { _tipBar(art, i, span, len, true, x0, x1, y0, y1, fill) }
                 }
             }
         }
+    }
+
+    // A bar's tooltip: where it is (a category, a value, or a histogram's
+    // bin: from to) and its length
+    _tipBar(art, i, span, len, vert, x0, x1, y0, y1, fill) {
+        p = art get("pos") at(i)
+        edge = (art get("align") == "edge") && ((art get("width")) type == "Array")
+        where = edge ifTrue { _tipVal(span at(0), vert) + " to " + _tipVal(span at(1), vert) } ifFalse { _tipVal(p, vert) }
+        extra = [_tipName(vert) + ": " + where, _tipName(vert not) + ": " + PlotTicks short(len, 4)]
+        _tcv tipRect(_tipAx, art get("_sid"), Math min(x0, x1), Math min(y0, y1), (x1 - x0) abs, (y1 - y0) abs,
+                     _tipLines(art, i, extra), fill)
     }
 
     _drawFill(cv, art) {
@@ -1608,6 +1717,14 @@ PlotAxes = Object clone {
         edge = art get("edgecolor")
         cv polygon(px, py, #{fill: art get("color"), alpha: art get("alpha"), stroke: edge,
                              width: (edge != nil) ifTrue { _pt(art get("linewidth") ?? 1) } ifFalse { nil }, join: "round"})
+        _tipping(art) ifTrue {
+            rpx = (_px(cx + r) - _px(cx)) abs
+            pct = ((sweep abs) * 100) / 360.0
+            v = art get("value")
+            lines = [art get("label") ?? "", ((v == nil) ifTrue { "" } ifFalse { PlotTicks short(v, 4) + " " }) + "(" + PlotTicks short(pct, 3) + "%)"]
+            ((art get("tooltip")) type == "Array") ifTrue { lines = _tipLines(art, 0, lines slice(1, 2)) }
+            _tcv tipWedge(_tipAx, art get("_sid"), _px(cx), _py(cy), (_px(cx + r0) - _px(cx)) abs, rpx, a0, a1, lines, art get("color"))
+        }
     }
 
     // Error bars: segments [x0, y0, x1, y1] in data units, with caps
@@ -2034,6 +2151,13 @@ PlotAxes = Object clone {
         // the first row belongs at the extent's top: flip when that is lower
         cv image(Math min(xa, xb), Math min(ya, yb), (xb - xa) abs, (yb - ya) abs, img,
                  #{alpha: art get("alpha"), flipY: yb > ya})
+        rows = art get("rows")
+        (_tipping(art) && (rows != nil) && (art get("rgb") != true) && ((art get("nrows") * art get("ncols")) <= 250000)) ifTrue {
+            nr = art get("nrows")
+            nc = art get("ncols")
+            _tcv tipGrid(_tipAx, art get("_sid"), Math min(xa, xb), Math min(ya, yb), (xb - xa) abs, (yb - ya) abs, nr, nc, yb > ya,
+                         rows flatten, art get("label") ?? colorbarLabel ?? "", _tipIndexNames(ytickSpec, nr), _tipIndexNames(xtickSpec, nc))
+        }
     }
 
     // An image artist's rows as an Image: colours as they are (0..1, or
@@ -2414,6 +2538,7 @@ PlotAxes = Object clone {
 
     // Draw a laid-out legend with its top left at lx, ly
     _legendBox(cv, lay, lx, ly, o) {
+        iv = (cv hasMethod("beginLegendItem")) && (cv isInteractive)
         fs = lay get("fs")
         pad = lay get("pad")
         w = lay get("w")
@@ -2432,8 +2557,14 @@ PlotAxes = Object clone {
         lay get("ncol") times { |c|
             y = top
             (entries slice(c * nrows, Math min((c + 1) * nrows, entries size))) each { |a|
+                iv ifTrue {
+                    cv beginLegendItem(a get("_sid"))
+                    // the whole row takes the click
+                    cv rect(x, y - (lay get("rowH") / 2), lay get("widths") at(c), lay get("rowH"), #{fill: "#ffffff", alpha: 0})
+                }
                 _legendHandle(cv, a, x, y, fs, lay get("handle"))
                 cv text(x + lay get("handle") + lay get("gap"), y, a get("label") toString, #{size: fs, valign: "center"})
+                iv ifTrue { cv endLegendItem }
                 y = y + lay get("rowH")
             }
             x = x + (lay get("widths") at(c)) + lay get("colSp")
@@ -3013,7 +3144,7 @@ PlotAxes = Object clone {
                 linestyle: ls, marker: marker, markersize: opts get("markersize") ?? opts get("ms"),
                 markerfacecolor: opts get("markerfacecolor") ?? opts get("mfc"),
                 markeredgecolor: opts get("markeredgecolor") ?? opts get("mec"),
-                label: opts get("label"), alpha: opts get("alpha")}
+                label: opts get("label"), alpha: opts get("alpha"), tooltip: opts get("tooltip")}
         _adopt(art)
         artists append(art)
         art
@@ -3042,7 +3173,7 @@ PlotAxes = Object clone {
         art = #{kind: "bars", orient: orient, pos: pos, lengths: lens, width: thick ?? 0.8,
                 bottom: base ?? 0, align: opts get("align") ?? "center",
                 edgecolor: _hexOrNil(opts get("edgecolor")), linewidth: opts get("linewidth"),
-                label: opts get("label"), alpha: opts get("alpha")}
+                label: opts get("label"), alpha: opts get("alpha"), tooltip: opts get("tooltip")}
         (c type == "Array") ifTrue {
             art set("colors", c map { |s| PlotColor hex(s) })
             art set("color", art get("colors") first)

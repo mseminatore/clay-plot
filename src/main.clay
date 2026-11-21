@@ -259,12 +259,15 @@ Plot = Object clone {
 
     // ---- output -----------------------------------------------------------
 
-    // Save the current figure; the extension picks the format (.png or
-    // .svg). opts: dpi
+    // Save the current figure; the extension picks the format (.png, .svg,
+    // .pdf, or .html: an interactive page). opts: dpi, interactive, title
     savefig(path, opts = nil) { gcf savefig(path, opts) }
 
-    // The current figure as SVG text, or as a PNG file's bytes
-    toSvg(dpiFor = nil) { gcf toSvg(dpiFor) }
+    // The current figure as SVG text (opts: dpi, interactive), or as a PNG file's bytes
+    toSvg(opts = nil) { gcf toSvg(opts) }
+
+    // The current figure as an interactive web page (a String); see PlotFigure toHtml
+    toHtml(opts = nil) { gcf toHtml(opts) }
     toPng(dpiFor = nil) { gcf toPng(dpiFor) }
 
     // Open the current figure in the system viewer, then start afresh (as
