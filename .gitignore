@@ -1,5 +1,7 @@
 # bricks installed by `clay bricks install`
 bricks/
+.DS_Store
+
 # figures written by the examples
 examples/out/
 # clay --compile output
