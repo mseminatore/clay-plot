@@ -137,8 +137,10 @@ fonts do not).
 ## PDF
 
 `savefig("f.pdf")` writes a one-page PDF the figure's size: vector lines, shapes and text,
-sharp at any zoom, with images embedded as PNG. `drawPdf` puts a figure inside a larger
-document, between paragraphs of a report:
+sharp at any zoom, with images embedded as PNG. A PDF figure is static: tooltips and legend
+toggles need a browser, so they are in [interactive web pages and SVG](#interactive-web-pages-and-svg)
+only (PDF has scripting, but hardly any viewer but Adobe's runs it). `drawPdf` puts a figure
+inside a larger document, between paragraphs of a report:
 
 ```clay norun
 import("plot")
