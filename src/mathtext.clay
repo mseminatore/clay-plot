@@ -15,7 +15,10 @@
 // $$...$$ is display math: the same, but \sum, \prod and the limit-like
 // operators (\lim \max \min \sup \inf \argmax \argmin) put their _ and ^
 // below and above them, as "$$\sum_{i=1}^{n} x_i$$" (a bigger \sum, the limits
-// centered over and under it). In $...$ they stay beside the symbol, as TeX.
+// centered over and under it), and \frac{a}{b} is stacked, a over b with a
+// bar between (also \dfrac). In $...$ limits stay beside the symbol and a
+// fraction is a/b, as TeX's text style is. Inside a stacked part (a limit, a
+// numerator) they are in line again.
 //
 // The backends' text and measure come here when a text has math: it is
 // broken into runs (text, size, raise), laid out along the baseline, and
@@ -29,6 +32,12 @@ PlotMath = Object clone {
     BIGOP = 1.25            // a display \sum's size, of the text's
     LIMUP = 0.9             // how far the limit over an operator rises, in ems
     LIMDOWN = 0.92          // how far the limit under it drops
+    RULE = "\x01"           // the text of a fraction's bar, which is drawn, not written
+    BAR = 0.065             // a bar's thickness, in ems
+    AXIS = 0.28             // where the bar is, above the baseline
+    FRACSIZE = 0.85         // a stacked numerator's and denominator's size
+    FRACUP = 0.5            // how far the numerator's baseline rises
+    FRACDOWN = 0.5          // how far the denominator's drops
 
     // Is there math in s: two $ that aren't \$
     has(s) {
@@ -133,7 +142,11 @@ PlotMath = Object clone {
                         i = (display && (_limitOps find { |s| s == name }) != nil) ifTrue {
                             _limits(name, m, next, scale, rise, out)
                         } ifFalse {
-                            _expand(name, m, next, scale, rise, out)
+                            (display && ((name == "frac") || (name == "dfrac"))) ifTrue {
+                                _stackedFrac(m, next, scale, rise, out)
+                            } ifFalse {
+                                _expand(name, m, next, scale, rise, out)
+                            }
                         }
                     } ifFalse {
                         _add(out, (c == "-") ifTrue { PlotTicks minus } ifFalse { c }, scale, rise)
@@ -176,6 +189,18 @@ PlotMath = Object clone {
         (lo != nil) ifTrue { _limit(lo, scale * SUP, rise - (LIMDOWN * scale), out, [col, 1]) }
         (hi != nil) ifTrue { _limit(hi, scale * SUP, rise + (LIMUP * scale), out, [col, 2]) }
         j
+    }
+
+    // \frac in display math: a column of the numerator (row 0), the bar (row 1,
+    // a run of RULE whose scale is its thickness) and the denominator (row 2)
+    _stackedFrac(m, next, scale, rise, out) {
+        [a, mid] = _argument(m, next)
+        [b, after] = _argument(m, mid)
+        col = out size
+        _limit(a, scale * FRACSIZE, rise + (FRACUP * scale), out, [col, 0])
+        _add(out, RULE, BAR * scale, rise + (AXIS * scale), [col, 1])
+        _limit(b, scale * FRACSIZE, rise - (FRACDOWN * scale), out, [col, 2])
+        after
     }
 
     // m as runs tagged with a stack
@@ -223,7 +248,7 @@ PlotMath = Object clone {
             _math(arg, scale, rise, out)
             return after
         }
-        (name == "frac") ifTrue {
+        ((name == "frac") || (name == "dfrac") || (name == "tfrac")) ifTrue {
             [a, mid] = _argument(m, next)
             [b, after] = _argument(m, mid)
             _math(a, scale, rise, out)
@@ -238,7 +263,7 @@ PlotMath = Object clone {
             return after
         }
         // spacing
-        (([",", ";", ":", " ", "quad"] find { |s| s == name }) != nil) ifTrue { _add(out, " ", scale, rise); return next }
+        (([",", ";", ":", " ", "quad", "qquad"] find { |s| s == name }) != nil) ifTrue { _add(out, " ", scale, rise); return next }
         (name == "!") ifTrue { return next }
         // an escaped character: \{ \} \$ \% \_ \# \&
         ((name length == 1) && ("{}$%_#&^" contains(name))) ifTrue { _add(out, name, scale, rise); return next }
@@ -291,6 +316,7 @@ PlotMath = Object clone {
     }
 
     _runWidth(cv, r, size) {
+        (r at(0) == RULE) ifTrue { return 0 }
         (r at(3) == nil) ifTrue { return cv _plainMeasure(r at(0), size * r at(1)) }
         cv _plainMeasure(r at(0), size * r at(1), r at(3))
     }
@@ -302,11 +328,13 @@ PlotMath = Object clone {
         (_columns(rs, rs map { |r| _runWidth(cv, r, size) })) at(1)
     }
 
-    // Where each run starts, along the line, and the line's width. The runs of
-    // a stack (r at(4), [column, row]) are rows over each other: each row
-    // centered in the column's width, which is its widest row's.
+    // Where each run starts, along the line, the line's width, and for a run
+    // of a stack its column's [start, width] (else nil). The runs of a stack
+    // (r at(4), [column, row]) are rows over each other: each row centered in
+    // the column's width, which is its widest row's.
     _columns(rs, widths) {
         xs = []
+        cols = []
         adv = 0
         i = 0
         n = rs size
@@ -314,6 +342,7 @@ PlotMath = Object clone {
             st = ((rs at(i)) size > 4) ifTrue { (rs at(i)) at(4) } ifFalse { nil }
             (st == nil) ifTrue {
                 xs append(adv)
+                cols append(nil)
                 adv = adv + (widths at(i))
                 i = i + 1
             } ifFalse {
@@ -332,6 +361,7 @@ PlotMath = Object clone {
                     key = (((rs at(k)) at(4)) at(1)) toString
                     done = used get(key) ?? 0
                     xs append(adv + ((w - (rowW get(key))) / 2) + done)
+                    cols append([adv, w])
                     used set(key, done + (widths at(k)))
                     k = k + 1
                 }
@@ -339,7 +369,7 @@ PlotMath = Object clone {
                 i = j
             }
         }
-        [xs, adv]
+        [xs, adv, cols]
     }
 
     // Draw s with math at x, y (style as the backends' text: size, anchor,
@@ -353,6 +383,7 @@ PlotMath = Object clone {
         placed = _columns(rs, widths)
         xs = placed at(0)
         total = placed at(1)
+        cols = placed at(2)
         anchor = st get("anchor") ?? "start"
         off = (anchor == "middle") ifTrue { 0 - (total / 2) } ifFalse { (anchor == "end") ifTrue { 0 - total } ifFalse { 0 } }
         rot = st get("rotate") ?? 0
@@ -375,7 +406,16 @@ PlotMath = Object clone {
             o set("anchor", "start")
             o set("valign", "baseline")
             (r at(3) != nil) ifTrue { o set("font", r at(3)) }
-            cv _plainText(px, py, r at(0), o)
+            (r at(0) == RULE) ifTrue {
+                // a fraction's bar: its column wide, from the column's start
+                cs = (cols at(i)) at(0) + off
+                th = (r at(1)) * size
+                cv line(bx + (ux * cs) + (uy * up), by + (uy * cs) - (ux * up),
+                        bx + (ux * (cs + ((cols at(i)) at(1)))) + (uy * up), by + (uy * (cs + ((cols at(i)) at(1)))) - (ux * up),
+                        #{stroke: st get("color") ?? "#000000", width: Math max(th, 0.5)})
+            } ifFalse {
+                cv _plainText(px, py, r at(0), o)
+            }
         }
         nil
     }
@@ -384,14 +424,45 @@ PlotMath = Object clone {
     // subscript characters where there are some, else as written
     flat(cv, s) {
         text = ""
-        runs(s) each { |r|
-            t = r at(0)
-            (r at(2) > 0.001) ifTrue { t = cv superscript(t) }
-            (r at(2) < -0.001) ifTrue { t = _subscript(t) }
-            text = text + t
+        rs = runs(s)
+        i = 0
+        { i < rs size } whileTrue {
+            r = rs at(i)
+            st = (r size > 4) ifTrue { r at(4) } ifFalse { nil }
+            // a stacked fraction: (numerator)/(denominator)
+            j = i
+            isFrac = false
+            (st != nil) ifTrue {
+                { (j < rs size) && ((rs at(j)) size > 4) && ((rs at(j)) at(4) != nil) && (((rs at(j)) at(4)) at(0) == st at(0)) } whileTrue {
+                    isFrac = isFrac || ((rs at(j)) at(0) == RULE)
+                    j = j + 1
+                }
+            }
+            isFrac ifTrue {
+                num = ""
+                den = ""
+                seen = false
+                k = i
+                { k < j } whileTrue {
+                    t = (rs at(k)) at(0)
+                    (t == RULE) ifTrue { seen = true } ifFalse { seen ifTrue { den = den + t } ifFalse { num = num + t } }
+                    k = k + 1
+                }
+                text = text + (_grouped(num)) + "/" + (_grouped(den))
+                i = j
+            } ifFalse {
+                t = r at(0)
+                (r at(2) > 0.001) ifTrue { t = cv superscript(t) }
+                (r at(2) < -0.001) ifTrue { t = _subscript(t) }
+                text = text + t
+                i = i + 1
+            }
         }
         text
     }
+
+    // t, in parentheses unless it is one character
+    _grouped(t) { (t length > 1) ifTrue { "(" + t + ")" } ifFalse { t } }
 
     _subscript(t) {
         digits = ["\xe2\x82\x80", "\xe2\x82\x81", "\xe2\x82\x82", "\xe2\x82\x83", "\xe2\x82\x84",

@@ -90,7 +90,8 @@ Greek letters; operators and relations (`\pm \times \cdot \neq \approx \equiv \l
 \notin \subset \subseteq \cup \cap \emptyset`, `\mathbb{R}` and N, Z, Q, C), logic
 (`\forall \exists \neg \land \lor`) and others (`\langle \rangle \hbar \ell \oplus \otimes
 \circ \ldots`) are their symbols; `\sin`, `\log`, `\exp`, `\max` and their kind are written
-upright; `\frac{a}{b}` reads a/b; font commands (`\mathrm`, `\mathcal`, `\mathbf`,
+upright; `\frac{a}{b}` reads a/b (stacked, with a bar, and `\sum` takes its limits above and
+below, in `$$...$$` display math); font commands (`\mathrm`, `\mathcal`, `\mathbf`,
 `\text`...) and accents (`\hat`, `\bar`, `\tilde`) show their letters as they are; and `-` is
 a minus sign. It works in every text: titles, labels, tick labels, legends, annotations. `\$`
 is a dollar sign, and a lone `$` is just text. In Clay strings a backslash is written `\\`, so

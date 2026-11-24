@@ -67,7 +67,8 @@ fig savefig("subplots.svg")
 
 - No 3-D plots or symlog scales yet, and dates go on the x axis only.
 - Text is DejaVu Sans only (Helvetica in PDF), in one weight.
-- Math text covers a subset of TeX: no stacked fractions, roots or matrices.
+- Math text covers a subset of TeX: no roots over their argument or matrices (`$$...$$` stacks
+  fractions and the limits of sums).
 
 See the [full list](docs/api.md#limitations).
 
