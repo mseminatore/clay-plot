@@ -163,7 +163,7 @@ PlotPdf = Object clone {
         (_symbolChars keys find { |k| t contains(k) }) != nil
     }
 
-    // PlotMath's runs split where the font changes: [text, scale, rise, font]
+    // PlotMath's runs split where the font changes: [text, scale, rise, font, stack]
     _fontRuns(runs) {
         out = []
         map = _symbolChars
@@ -172,7 +172,7 @@ PlotPdf = Object clone {
             cur = ""
             curSym = false
             flush = {
-                (cur != "") ifTrue { out append([cur, r at(1), r at(2), curSym ifTrue { "Symbol" } ifFalse { nil }]) }
+                (cur != "") ifTrue { out append([cur, r at(1), r at(2), curSym ifTrue { "Symbol" } ifFalse { nil }, (r size > 4) ifTrue { r at(4) } ifFalse { nil }]) }
                 cur = ""
             }
             chars = _chars(t)

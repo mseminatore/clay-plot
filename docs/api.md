@@ -115,6 +115,10 @@ Colormaps: `viridis` (the default), `plasma`, `inferno`, `magma`, `cividis`, `gr
 - Polar axes start their radius at 0 and have no log radius or twin axes; `quiver` points
   arrows by their data units.
 - Math text is a subset of TeX: no stacked fractions, roots or matrices, and one font.
+  `$$...$$` is display math, which sets the limits of `\sum`, `\prod`, `\lim`, `\max`, `\min`,
+  `\sup`, `\inf`, `\argmax` and `\argmin` above and below them (`$$\sum_{i=1}^{n} x_i$$`; in
+  `$...$` they stay beside, as TeX does). Axis labels and titles don't reserve room for the
+  taller text, so leave some around it.
   PDF draws Greek and most symbols in its Symbol font, and the few it lacks (ℝ ℕ ℤ ≪ ≫ ↦ ∥ ħ ℓ)
   as near as plain text gets (`R`, `<<`...).
 - Text is DejaVu Sans only (Helvetica in PDF), in one weight (`fontweight` applies to SVG and PDF alone). SVG asks the

@@ -490,6 +490,27 @@ Test describe("Math text") {
         Test assertEqual(runs2 map { |r| r at(3) }, ["Symbol", nil, "Symbol"])
         Test assertEqual((runs2 at(1)) first, " R ")
     }
+    Test it("stacks limits over and under \\sum in $$display$$ math only") {
+        // display: base, below, above, each tagged [column, row]
+        r = PlotMath runs("$$\\sum_{i=1}^{n} x$$")
+        Test assertEqual(r map { |x| x at(0) }, ["∑", "i=1", "n", " x"])
+        Test assertEqual(r map { |x| (x size > 4) ifTrue { (x at(4)) at(1) } ifFalse { nil } }, [0, 1, 2, nil])
+        Test assertEqual(((r at(1)) at(4)) at(0), ((r at(2)) at(4)) at(0))        // one column
+        Test assertTrue((r at(2)) at(2) > 0 && (r at(1)) at(2) < 0)                // above, below
+        // inline: beside it, as TeX does
+        Test assertEqual(runs value("$\\sum_i^n$"), [["∑", 100, 0], ["i", 70, -18], ["n", 70, 42]])
+        // no limits, or an operator that takes none: as ever
+        Test assertEqual(((PlotMath runs("$$\\sum x$$")) first) size, 3)
+        Test assertEqual(((PlotMath runs("$$\\int_0^1 x$$")) first) size, 3)
+        Test assertEqual(((PlotMath runs("$$\\lim_{n \\to \\infty} a$$")) first) first, "lim")
+        // a $$ pair is display; two in a text each close on their own $$
+        Test assertEqual((PlotMath runs("$$a$$ and $$b$$")) map { |x| x at(0) }, ["a and b"])
+        // a column is as wide as its widest row, rows centered over each other
+        placed = PlotMath _columns([["A", 1, 0, nil, [0, 0]], ["bbbb", 0.5, -1, nil, [0, 1]], ["c", 1, 0]], [10, 40, 5])
+        Test assertEqual(placed, [[15, 0, 40], 45])
+        // the terminal puts them beside, as sub- and superscripts
+        Test assertEqual(PlotMath flat(PlotTerm new(4, 2, false), "$$\\sum_{i=1}^{n}$$"), "∑i=₁n")
+    }
     Test it("draws math in every backend") {
         Plot close
         Plot plot([1, 2], #{label: "$\\sigma^2$"})

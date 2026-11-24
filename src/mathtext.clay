@@ -12,6 +12,11 @@
 // \frac{a}{b} (as a/b) work too. Outside math, \$ is a dollar sign; a lone $
 // is just text.
 //
+// $$...$$ is display math: the same, but \sum, \prod and the limit-like
+// operators (\lim \max \min \sup \inf \argmax \argmin) put their _ and ^
+// below and above them, as "$$\sum_{i=1}^{n} x_i$$" (a bigger \sum, the limits
+// centered over and under it). In $...$ they stay beside the symbol, as TeX.
+//
 // The backends' text and measure come here when a text has math: it is
 // broken into runs (text, size, raise), laid out along the baseline, and
 // each run drawn by the backend. The terminal draws scripts as Unicode
@@ -21,6 +26,9 @@ PlotMath = Object clone {
     SUP = 0.7               // a script's size, of its base's
     RISE = 0.42             // how far a superscript rises, in its base's em
     DROP = 0.18             // how far a subscript drops
+    BIGOP = 1.25            // a display \sum's size, of the text's
+    LIMUP = 0.9             // how far the limit over an operator rises, in ems
+    LIMDOWN = 0.92          // how far the limit under it drops
 
     // Is there math in s: two $ that aren't \$
     has(s) {
@@ -53,12 +61,15 @@ PlotMath = Object clone {
                 plain = plain + "$"
                 i = i + 2
             } ifFalse {
-                close = (c == "$") ifTrue { _closing(t, i + 1) } ifFalse { -1 }
+                // $$ opens display math, closed by the next unescaped $$
+                disp = (c == "$") && (i + 1 < n) && (t at(i + 1) == "$")
+                close = (c == "$") ifTrue { _closing(t, i + (disp ifTrue { 2 } ifFalse { 1 }), disp) } ifFalse { -1 }
                 (close > 0) ifTrue {
                     _add(out, plain, 1.0, 0.0)
                     plain = ""
-                    _math(t slice(i + 1, close), 1.0, 0.0, out)
-                    i = close + 1
+                    d = disp ifTrue { 2 } ifFalse { 1 }
+                    _math(t slice(i + d, close), 1.0, 0.0, out, disp)
+                    i = close + d
                 } ifFalse {
                     plain = plain + c
                     i = i + 1
@@ -69,32 +80,39 @@ PlotMath = Object clone {
         out
     }
 
-    // The index of the $ that closes math opened before start, or -1
-    _closing(t, start) {
+    // The index of the $ (the $$ if display) that closes math opened before
+    // start, or -1
+    _closing(t, start, display = false) {
         i = start
         { i < t length } whileTrue {
             c = t at(i)
             (c == "\\") ifTrue { i = i + 2 } ifFalse {
-                (c == "$") ifTrue { return i }
+                (c == "$") ifTrue {
+                    (display == false) ifTrue { return i }
+                    ((i + 1 < t length) && (t at(i + 1) == "$")) ifTrue { return i }
+                }
                 i = i + 1
             }
         }
         -1
     }
 
-    // Add text as a run, joining it to the last run when they match
-    _add(out, text, scale, rise) {
+    // Add text as a run, joining it to the last run when they match; stack,
+    // if given, is [column, row] (see _limits): the runs of one column are
+    // drawn over each other
+    _add(out, text, scale, rise, stack = nil) {
         (text == "") ifTrue { return nil }
         last = (out size > 0) ifTrue { out last } ifFalse { nil }
-        ((last != nil) && (last at(1) == scale) && (last at(2) == rise)) ifTrue {
+        lastStack = ((last != nil) && (last size > 4)) ifTrue { last at(4) } ifFalse { nil }
+        ((last != nil) && (last at(1) == scale) && (last at(2) == rise) && (lastStack == stack)) ifTrue {
             last setAt(0, last at(0) + text)
         } ifFalse {
-            out append([text, scale, rise])
+            (stack == nil) ifTrue { out append([text, scale, rise]) } ifFalse { out append([text, scale, rise, nil, stack]) }
         }
     }
 
-    // Math source m into runs, at a scale and rise
-    _math(m, scale, rise, out) {
+    // Math source m into runs, at a scale and rise; display for $$...$$
+    _math(m, scale, rise, out, display = false) {
         i = 0
         n = m length
         { i < n } whileTrue {
@@ -107,12 +125,16 @@ PlotMath = Object clone {
             } ifFalse {
                 (c == "{") ifTrue {
                     close = _group(m, i)
-                    _math(m slice(i + 1, close), scale, rise, out)
+                    _math(m slice(i + 1, close), scale, rise, out, display)
                     i = close + 1
                 } ifFalse {
                     (c == "\\") ifTrue {
                         [name, next] = _command(m, i)
-                        i = _expand(name, m, next, scale, rise, out)
+                        i = (display && (_limitOps find { |s| s == name }) != nil) ifTrue {
+                            _limits(name, m, next, scale, rise, out)
+                        } ifFalse {
+                            _expand(name, m, next, scale, rise, out)
+                        }
                     } ifFalse {
                         _add(out, (c == "-") ifTrue { PlotTicks minus } ifFalse { c }, scale, rise)
                         i = i + 1
@@ -120,6 +142,47 @@ PlotMath = Object clone {
                 }
             }
         }
+    }
+
+    // Operators that take their limits above and below in display math
+    _limitOps = ["sum", "prod", "lim", "max", "min", "sup", "inf", "argmax", "argmin"]
+
+    // A display operator with limits: its _ and ^ (either order) set below and
+    // above it, each centered, as one column of rows (base 0, below 1, above 2:
+    // a [column, row] on their runs). Without limits it is as any command.
+    _limits(name, m, next, scale, rise, out) {
+        lo = nil
+        hi = nil
+        j = next
+        more = true
+        { more } whileTrue {
+            k = j
+            { (k < m length) && (m at(k) == " ") } whileTrue { k = k + 1 }
+            ((k < m length) && (m at(k) == "_") && (lo == nil)) ifTrue {
+                [lo, j] = _argument(m, k + 1)
+            } ifFalse {
+                ((k < m length) && (m at(k) == "^") && (hi == nil)) ifTrue {
+                    [hi, j] = _argument(m, k + 1)
+                } ifFalse { more = false }
+            }
+        }
+        ((lo == nil) && (hi == nil)) ifTrue { return _expand(name, m, next, scale, rise, out) }
+        col = out size
+        big = (name == "sum") || (name == "prod")
+        bs = big ifTrue { scale * BIGOP } ifFalse { scale }
+        // a bigger sign sits lower, to stay centered on the line
+        br = big ifTrue { rise - (0.1 * scale) } ifFalse { rise }
+        _add(out, (_symbols get(name)) ?? name, bs, br, [col, 0])
+        (lo != nil) ifTrue { _limit(lo, scale * SUP, rise - (LIMDOWN * scale), out, [col, 1]) }
+        (hi != nil) ifTrue { _limit(hi, scale * SUP, rise + (LIMUP * scale), out, [col, 2]) }
+        j
+    }
+
+    // m as runs tagged with a stack
+    _limit(m, scale, rise, out, stack) {
+        tmp = []
+        _math(m, scale, rise, tmp)
+        tmp each { |r| _add(out, r at(0), r at(1), r at(2), stack) }
     }
 
     // A command's name (letters after \, or one other character) and where it ends
@@ -224,7 +287,7 @@ PlotMath = Object clone {
         rs = runs(s)
         (cv hasMethod("_fontRuns")) ifTrue { return cv _fontRuns(rs) }
         // PNG and SVG: the bundled font has every character the symbols use
-        rs map { |r| [r at(0), r at(1), r at(2), nil] }
+        rs map { |r| [r at(0), r at(1), r at(2), nil, (r size > 4) ifTrue { r at(4) } ifFalse { nil }] }
     }
 
     _runWidth(cv, r, size) {
@@ -235,7 +298,48 @@ PlotMath = Object clone {
     // The width of s with math, in the backend's units
     width(cv, s, size) {
         (cv hasMethod("superscript")) ifTrue { return cv _plainMeasure(flat(cv, s), size) }
-        (_laidOut(cv, s)) reduce(0) { |w, r| w + _runWidth(cv, r, size) }
+        rs = _laidOut(cv, s)
+        (_columns(rs, rs map { |r| _runWidth(cv, r, size) })) at(1)
+    }
+
+    // Where each run starts, along the line, and the line's width. The runs of
+    // a stack (r at(4), [column, row]) are rows over each other: each row
+    // centered in the column's width, which is its widest row's.
+    _columns(rs, widths) {
+        xs = []
+        adv = 0
+        i = 0
+        n = rs size
+        { i < n } whileTrue {
+            st = ((rs at(i)) size > 4) ifTrue { (rs at(i)) at(4) } ifFalse { nil }
+            (st == nil) ifTrue {
+                xs append(adv)
+                adv = adv + (widths at(i))
+                i = i + 1
+            } ifFalse {
+                j = i
+                rowW = #{}
+                { (j < n) && ((rs at(j)) size > 4) && ((rs at(j)) at(4) != nil) && (((rs at(j)) at(4)) at(0) == st at(0)) } whileTrue {
+                    key = (((rs at(j)) at(4)) at(1)) toString
+                    rowW set(key, (rowW get(key) ?? 0) + (widths at(j)))
+                    j = j + 1
+                }
+                w = 0
+                rowW each { |k, v| w = Math max(w, v) }
+                used = #{}
+                k = i
+                { k < j } whileTrue {
+                    key = (((rs at(k)) at(4)) at(1)) toString
+                    done = used get(key) ?? 0
+                    xs append(adv + ((w - (rowW get(key))) / 2) + done)
+                    used set(key, done + (widths at(k)))
+                    k = k + 1
+                }
+                adv = adv + w
+                i = j
+            }
+        }
+        [xs, adv]
     }
 
     // Draw s with math at x, y (style as the backends' text: size, anchor,
@@ -246,7 +350,9 @@ PlotMath = Object clone {
         size = st get("size") ?? 12
         rs = _laidOut(cv, s)
         widths = rs map { |r| _runWidth(cv, r, size) }
-        total = widths sum
+        placed = _columns(rs, widths)
+        xs = placed at(0)
+        total = placed at(1)
         anchor = st get("anchor") ?? "start"
         off = (anchor == "middle") ifTrue { 0 - (total / 2) } ifFalse { (anchor == "end") ifTrue { 0 - total } ifFalse { 0 } }
         rot = st get("rotate") ?? 0
@@ -257,9 +363,9 @@ PlotMath = Object clone {
         shift = PlotSvg _baselineShift(st get("valign"), size)
         bx = x - (uy * shift)
         by = y + (ux * shift)
-        adv = off
         rs size times { |i|
             r = rs at(i)
+            adv = off + (xs at(i))
             up = r at(2) * size
             px = bx + (ux * adv) + (uy * up)
             py = by + (uy * adv) - (ux * up)
@@ -270,7 +376,6 @@ PlotMath = Object clone {
             o set("valign", "baseline")
             (r at(3) != nil) ifTrue { o set("font", r at(3)) }
             cv _plainText(px, py, r at(0), o)
-            adv = adv + widths at(i)
         }
         nil
     }
@@ -322,7 +427,7 @@ PlotMath = Object clone {
                 notin: "∉", subset: "⊂", supset: "⊃", subseteq: "⊆", supseteq: "⊇", cup: "∪", cap: "∩",
                 emptyset: "∅", varnothing: "∅", setminus: "∖", Leftarrow: "⇐", Leftrightarrow: "⇔",
                 iff: "⇔", implies: "⇒", gets: "←", mapsto: "↦", ll: "≪", gg: "≫", parallel: "∥",
-                perp: "⊥", neg: "¬", lnot: "¬", land: "∧", wedge: "∧", lor: "∨", vee: "∨",
+                perp: "⊥", mid: "|", neg: "¬", lnot: "¬", land: "∧", wedge: "∧", lor: "∨", vee: "∨",
                 oplus: "⊕", otimes: "⊗", angle: "∠", triangle: "△", triangleq: "≜", dagger: "†",
                 ddagger: "‡", bullet: "•", surd: "√", nexists: "∄"
             }
