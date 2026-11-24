@@ -38,6 +38,9 @@ PlotMath = Object clone {
     FRACSIZE = 0.85         // a stacked numerator's and denominator's size
     FRACUP = 0.5            // how far the numerator's baseline rises
     FRACDOWN = 0.5          // how far the denominator's drops
+    FRACPAD = 0.5           // the size of the space each side of a stacked fraction
+                            // (about 0.14em, as TeX's \nulldelimiterspace), so its
+                            // bar doesn't run into a minus before it
 
     // Is there math in s: two $ that aren't \$
     has(s) {
@@ -192,14 +195,17 @@ PlotMath = Object clone {
     }
 
     // \frac in display math: a column of the numerator (row 0), the bar (row 1,
-    // a run of RULE whose scale is its thickness) and the denominator (row 2)
+    // a run of RULE whose scale is its thickness) and the denominator (row 2),
+    // with a small space (a space at FRACPAD) each side
     _stackedFrac(m, next, scale, rise, out) {
         [a, mid] = _argument(m, next)
         [b, after] = _argument(m, mid)
+        _add(out, " ", scale * FRACPAD, rise)
         col = out size
         _limit(a, scale * FRACSIZE, rise + (FRACUP * scale), out, [col, 0])
         _add(out, RULE, BAR * scale, rise + (AXIS * scale), [col, 1])
         _limit(b, scale * FRACSIZE, rise - (FRACDOWN * scale), out, [col, 2])
+        _add(out, " ", scale * FRACPAD, rise)
         after
     }
 
@@ -452,6 +458,8 @@ PlotMath = Object clone {
                 i = j
             } ifFalse {
                 t = r at(0)
+                // a stacked fraction's padding (a space smaller than the column beside it): none here
+                (_isPad(rs, i)) ifTrue { t = "" }
                 (r at(2) > 0.001) ifTrue { t = cv superscript(t) }
                 (r at(2) < -0.001) ifTrue { t = _subscript(t) }
                 text = text + t
@@ -459,6 +467,19 @@ PlotMath = Object clone {
             }
         }
         text
+    }
+
+    // Is run i the space padding a stacked fraction: a lone space beside a
+    // fraction's column, smaller than its runs (a space in the source is not)
+    _isPad(rs, i) {
+        r = rs at(i)
+        (r at(0) != " ") ifTrue { return false }
+        frac = { |k|
+            st = ((k >= 0) && (k < rs size) && ((rs at(k)) size > 4)) ifTrue { (rs at(k)) at(4) } ifFalse { nil }
+            (st != nil) && (r at(1) < (rs at(k)) at(1)) &&
+                ((rs find { |x| (x size > 4) && (x at(4) != nil) && ((x at(4)) at(0) == st at(0)) && (x at(0) == RULE) }) != nil)
+        }
+        (frac value(i - 1)) || (frac value(i + 1))
     }
 
     // t, in parentheses unless it is one character

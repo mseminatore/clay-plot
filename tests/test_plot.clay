@@ -512,22 +512,27 @@ Test describe("Math text") {
         Test assertEqual(PlotMath flat(PlotTerm new(4, 2, false), "$$\\sum_{i=1}^{n}$$"), "∑i=₁n")
     }
     Test it("stacks \\frac in display math: numerator, bar, denominator") {
+        // a small space each side, so a minus before it doesn't touch the bar
         r = PlotMath runs("$$\\frac{a+b}{c}$$")
-        Test assertEqual(r map { |x| x at(0) }, ["a+b", PlotMath RULE, "c"])
+        Test assertEqual(r map { |x| x at(0) }, [" ", "a+b", PlotMath RULE, "c", " "])
+        Test assertEqual(Math round((r first) at(1) * 100), 50)
+        Test assertTrue(((r first) size <= 4) || ((r first) at(4) == nil))
+        r = r slice(1, 4)
         Test assertEqual(r map { |x| (x at(4)) at(1) }, [0, 1, 2])
         Test assertEqual(((r at(0)) at(4)) at(0), ((r at(2)) at(4)) at(0))          // one column
         Test assertTrue((r at(0)) at(2) > (r at(1)) at(2) && (r at(1)) at(2) > (r at(2)) at(2))   // over, bar, under
         Test assertEqual(Math round((r at(1)) at(1) * 1000), 65)                  // the bar's thickness, in ems
         // in line: a/b, as before; \dfrac too
         Test assertEqual((PlotMath runs("$\\frac{a}{b}$")) first first, "a/b")
-        Test assertEqual((PlotMath runs("$$\\frac{a}{b}$$")) size, 3)
-        Test assertEqual((PlotMath runs("$$\\dfrac{a}{b}$$")) size, 3)
+        Test assertEqual((PlotMath runs("$$\\frac{a}{b}$$")) size, 5)
+        Test assertEqual((PlotMath runs("$$\\dfrac{a}{b}$$")) size, 5)
         // inside a stacked part: in line again
-        Test assertEqual((PlotMath runs("$$\\frac{\\frac{a}{b}}{c}$$")) map { |x| x at(0) }, ["a/b", PlotMath RULE, "c"])
+        Test assertEqual((PlotMath runs("$$\\frac{\\frac{a}{b}}{c}$$")) map { |x| x at(0) }, [" ", "a/b", PlotMath RULE, "c", " "])
         // the bar has no width; a column is as wide as its wider row
         cv = PlotTerm new(4, 2, false)
         Test assertEqual(PlotMath flat(cv, "$$\\frac{1}{n} + \\frac{a+b}{2}$$"), "1/n + (a+b)/2")
         Test assertEqual(PlotMath flat(cv, "$\\frac{1}{n}$"), "1/n")
+        Test assertEqual(PlotMath flat(cv, "$$-\\frac{1}{N} \\sum_{i}$$"), "−1/N ∑i")
         // and PNG, SVG and PDF draw the bar as a line
         svg = PlotSvg new(200, 80)
         PlotMath draw(svg, 10, 40, "$$\\frac{a}{b}$$", #{size: 12})
