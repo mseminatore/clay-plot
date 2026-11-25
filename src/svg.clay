@@ -27,6 +27,7 @@ PlotSvg = Object clone {
     height = 0
     parts = nil
     clips = 0
+    clipPrefix = "clip"     // unique per document, so inline SVGs don't share ids
     family = "DejaVu Sans, Arial, Helvetica, sans-serif"
     isInteractive = false
     uid = nil               // the svg element's id, when interactive
@@ -40,6 +41,7 @@ PlotSvg = Object clone {
         self height = h
         self parts = []
         self clips = 0
+        self clipPrefix = "clip" + (Crypto randomHex(4)) + "-"
         parts append("<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n")
         parts append("<svg xmlns=\"http://www.w3.org/2000/svg\" xmlns:xlink=\"http://www.w3.org/1999/xlink\" width=\"" + num(w) + "\" height=\"" + num(h) +
             "\" viewBox=\"0 0 " + num(w) + " " + num(h) + "\" font-family=\"" + family + "\">\n")
@@ -211,7 +213,7 @@ PlotSvg = Object clone {
 
     clip(x, y, w, h) {
         clips = clips + 1
-        id = "clip" + clips toString
+        id = clipPrefix + clips toString
         parts append("<clipPath id=\"" + id + "\"><rect x=\"" + num(x) + "\" y=\"" + num(y) + "\" width=\"" + num(w) + "\" height=\"" + num(h) + "\"/></clipPath>\n")
         parts append("<g clip-path=\"url(#" + id + ")\">\n")
     }

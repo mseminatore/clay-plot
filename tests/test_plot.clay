@@ -1233,6 +1233,17 @@ Test describe("SVG output") {
         Test assertTrue(PlotSvg measure("MMMM", 10) > PlotSvg measure("iiii", 10))
         Test assertEqual(Math round(PlotSvg measure("Hello", 20)), 51)
     }
+    Test it("gives each document its own clip ids, so several can share a page") {
+        idOf = { |w|
+            s = PlotSvg new(100, 100)
+            s clip(0, 0, w, w)
+            s unclip
+            ((s finish split("<clipPath id=\"")) at(1) split("\"")) at(0)
+        }
+        a = idOf value(50)
+        Test assertTrue(a != (idOf value(80)))
+        Test assertTrue(a endsWith("-1"))
+    }
     Test it("draws an empty figure") {
         Plot close
         Test assertTrue(PlotFigure new toSvg contains("</svg>"))
